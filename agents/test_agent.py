@@ -17,10 +17,12 @@ QUESTIONS_PER_CYCLE = int(os.getenv("QUESTIONS_PER_CYCLE", "3"))
 
 async def _fire_async(session, question: str) -> dict | None:
     import aiohttp
-    # Route to Blueverse if configured
     if RAG_APP_URL.lower() == "blueverse":
         import blueverse_connector
         return blueverse_connector.query(question)
+    if RAG_APP_URL.lower() == "custom":
+        import custom_agent_connector
+        return custom_agent_connector.query(question)
     try:
         async with session.post(
             f"{RAG_APP_URL}/query",
@@ -121,11 +123,16 @@ def analyze_app_and_generate_questions() -> list[dict]:
     content_block = ""
 
     if RAG_APP_URL.lower() == "blueverse":
-        # ── Blueverse: probe the agent to discover what it knows ──────────────
         print("[TestAgent] Target is Blueverse — probing agent knowledge...")
         import blueverse_connector
         content_block = blueverse_connector.probe_agent_knowledge()
         source_label  = "Blueverse agent (self-reported knowledge)"
+
+    elif RAG_APP_URL.lower() == "custom":
+        print("[TestAgent] Target is Custom Agent — probing agent knowledge...")
+        import custom_agent_connector
+        content_block = custom_agent_connector.probe_agent_knowledge()
+        source_label  = "Custom agent (self-reported knowledge)"
 
     else:
         # ── Custom RAG App: fetch actual document content ─────────────────────
@@ -223,24 +230,49 @@ def retry_dead_letter_queue():
     if not dlq:
         return
     print(f"[TestAgent] Retrying {len(dlq)} failed question(s) from DLQ...")
+
+    # Use the connector that matches the current target
+    if RAG_APP_URL.lower() == "blueverse":
+        import blueverse_connector
+        _connector_query = blueverse_connector.query
+    elif RAG_APP_URL.lower() == "custom":
+        import custom_agent_connector
+        _connector_query = custom_agent_connector.query
+    else:
+        _connector_query = None
+
     import requests
     for item in dlq:
         q = item["question"]
         try:
-            resp = requests.post(f"{RAG_APP_URL}/query",
-                                 json={"question": q}, timeout=30)
-            if resp.status_code == 200:
-                data   = resp.json()
-                run_id = storage.save_test_run(
-                    question         = q,
-                    answer           = data.get("answer", ""),
-                    retrieved_context= data.get("retrieved_context", []),
-                    sources          = data.get("sources", []),
-                )
-                storage.remove_from_dlq(q)
-                print(f"[TestAgent] DLQ retry succeeded for: {q[:60]}")
+            if _connector_query:
+                data = _connector_query(q)
+                if data:
+                    storage.save_test_run(
+                        question          = q,
+                        answer            = data.get("answer", ""),
+                        retrieved_context = data.get("retrieved_context", []),
+                        sources           = data.get("sources", []),
+                    )
+                    storage.remove_from_dlq(q)
+                    print(f"[TestAgent] DLQ retry succeeded for: {q[:60]}")
+                else:
+                    storage.save_to_dlq(q, "No response from connector")
             else:
-                storage.save_to_dlq(q, f"HTTP {resp.status_code}")
+                resp = requests.post(f"{RAG_APP_URL}/query",
+                                     json={"question": q}, timeout=30)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    storage.save_test_run(
+                        question          = q,
+                        answer            = data.get("answer", ""),
+                        retrieved_context = data.get("retrieved_context", []),
+                        sources           = data.get("sources", []),
+                    )
+                    storage.remove_from_dlq(q)
+                    print(f"[TestAgent] DLQ retry succeeded for: {q[:60]}")
+                else:
+                    storage.save_to_dlq(q, f"HTTP {resp.status_code}")
         except Exception as e:
             storage.save_to_dlq(q, str(e))
 
@@ -266,7 +298,7 @@ def run():
 
     print(f"[TestAgent] Selected {len(selected)} questions to fire:")
     for q in selected:
-        print(f"  → {q[:80]}")
+        print(f"  -> {q[:80]}")
 
     # Parallel firing via asyncio + aiohttp
     results = asyncio.run(fire_questions_parallel(selected))

@@ -1,0 +1,183 @@
+"""
+Custom Agent Connector
+
+Two modes (set CUSTOM_AGENT_MODE in .env):
+  "local"  — LLM-powered agent using your existing llm_client + document store
+             (works immediately with no extra config beyond your LLM key)
+  "api"    — POST questions to any external REST endpoint
+             (set CUSTOM_AGENT_URL + optionally CUSTOM_AGENT_API_KEY)
+"""
+import os
+import requests
+from dotenv import load_dotenv
+
+load_dotenv()
+
+MODE = os.getenv("CUSTOM_AGENT_MODE", "local").lower()
+
+# API mode
+AGENT_URL      = os.getenv("CUSTOM_AGENT_URL", "")
+API_KEY        = os.getenv("CUSTOM_AGENT_API_KEY", "")
+AUTH_HEADER    = os.getenv("CUSTOM_AGENT_AUTH_HEADER", "Authorization")
+AUTH_PREFIX    = os.getenv("CUSTOM_AGENT_AUTH_PREFIX", "Bearer")
+REQUEST_FIELD  = os.getenv("CUSTOM_AGENT_REQUEST_FIELD", "question")
+RESPONSE_FIELD = os.getenv("CUSTOM_AGENT_RESPONSE_FIELD", "answer")
+
+# Local mode
+SYSTEM_PROMPT = os.getenv(
+    "CUSTOM_AGENT_SYSTEM_PROMPT",
+    (
+        "You are a knowledgeable and concise assistant. "
+        "Answer the question strictly using the context provided. "
+        "If the answer is not in the context, say so clearly."
+    ),
+)
+AGENT_DESCRIPTION = os.getenv("CUSTOM_AGENT_DESCRIPTION", "Custom LLM-based agent")
+
+
+def query(question: str) -> dict | None:
+    if MODE == "api":
+        return _query_api(question)
+    return _query_local(question)
+
+
+def _query_api(question: str) -> dict | None:
+    if not AGENT_URL:
+        raise ValueError("CUSTOM_AGENT_URL not set. Add it to your .env file.")
+
+    headers = {"Content-Type": "application/json"}
+    if API_KEY:
+        headers[AUTH_HEADER] = f"{AUTH_PREFIX} {API_KEY}".strip()
+
+    try:
+        resp = requests.post(
+            AGENT_URL,
+            json={REQUEST_FIELD: question},
+            headers=headers,
+            timeout=60,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+        answer = (
+            data.get(RESPONSE_FIELD)
+            or data.get("answer")
+            or data.get("output")
+            or data.get("text")
+            or data.get("content")
+            or str(data)
+        )
+
+        raw_sources = data.get("sources", data.get("source_docs", data.get("references", [])))
+        contexts = []
+        for s in raw_sources if isinstance(raw_sources, list) else []:
+            if isinstance(s, dict):
+                contexts.append({
+                    "source": s.get("title", s.get("name", "Custom Agent")),
+                    "text":   s.get("content", s.get("text", str(s))),
+                    "score":  float(s.get("score", 1.0)),
+                })
+            elif isinstance(s, str):
+                contexts.append({"source": "Custom Agent", "text": s, "score": 1.0})
+
+        return {
+            "question":          question,
+            "answer":            answer,
+            "retrieved_context": contexts,
+            "sources":           [c["source"] for c in contexts] or ["Custom Agent"],
+        }
+
+    except requests.HTTPError as e:
+        print(f"[CustomAgent] HTTP {e.response.status_code}: {e.response.text[:200]}")
+        return None
+    except Exception as e:
+        print(f"[CustomAgent] API error: {e}")
+        return None
+
+
+def _query_local(question: str) -> dict | None:
+    import sys
+    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+    import llm_client
+
+    # Pull context from the local document store
+    try:
+        from rag_app import retriever
+        context_chunks = retriever.retrieve(question, top_k=4)
+    except Exception:
+        context_chunks = []
+
+    context_text = "\n\n".join(
+        f"[{c['source']}] {c['text']}" for c in context_chunks
+    )
+
+    if context_text:
+        user_content = (
+            f"Context:\n{context_text}\n\n"
+            f"Question: {question}\n\n"
+            "Answer based only on the context above."
+        )
+    else:
+        user_content = question
+
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user",   "content": user_content},
+    ]
+
+    try:
+        answer = llm_client.chat(messages, temperature=0.2)
+        return {
+            "question":          question,
+            "answer":            answer,
+            "retrieved_context": context_chunks,
+            "sources":           [c["source"] for c in context_chunks] or ["Custom Agent"],
+        }
+    except Exception as e:
+        print(f"[CustomAgent] LLM error: {e}")
+        return None
+
+
+def is_online() -> bool:
+    if MODE == "api":
+        try:
+            base = AGENT_URL.rsplit("/", 1)[0] if "/" in AGENT_URL else AGENT_URL
+            requests.get(base, timeout=5)
+            return True
+        except Exception:
+            return False
+    else:
+        try:
+            import llm_client
+            llm_client.get_client()
+            return True
+        except Exception:
+            return False
+
+
+def probe_agent_knowledge() -> str:
+    """Ask discovery questions to understand what the agent knows."""
+    probe_questions = [
+        "What topics and subjects can you help me with? Please be specific.",
+        "What kind of information do you have access to? List all areas you cover.",
+        "Give me a summary of the policies and rules you know about, "
+        "including any specific numbers, limits, or percentages.",
+    ]
+
+    print("[CustomAgent] Probing agent to discover what it knows...")
+    responses = []
+
+    for q in probe_questions:
+        result = query(q)
+        if result and result.get("answer"):
+            responses.append(result["answer"])
+            print(f"[CustomAgent] Probe: {result['answer'][:100]}...")
+
+    if responses:
+        combined = "\n\n".join(responses)
+        print(f"[CustomAgent] Knowledge discovered from {len(responses)} probe questions.")
+        return combined
+
+    fallback = AGENT_DESCRIPTION
+    print("[CustomAgent] Probing failed. Using CUSTOM_AGENT_DESCRIPTION from .env.")
+    return fallback

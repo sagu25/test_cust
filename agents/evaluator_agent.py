@@ -27,8 +27,11 @@ def run():
     if not unevaluated:
         print("[EvaluatorAgent] No new runs to evaluate.")
     else:
-        for run in unevaluated:
+        for i, run in enumerate(unevaluated):
             _evaluate_run(run)
+            if i < len(unevaluated) - 1:
+                print("  [Rate limit buffer] Waiting 8s before next run...")
+                time.sleep(8)
 
     _run_consistency_check()
     report_generator.generate()
