@@ -351,4 +351,178 @@ with st.expander("📋 Raw Evaluation Data"):
         hide_index=True,
     )
 
-st.caption("🔄 Dashboard auto-refreshes every 30 seconds | Built with Streamlit + Groq/Azure")
+st.divider()
+
+# ── metrics guide ─────────────────────────────────────────────────────────────
+
+st.markdown("### 📖 Understanding the Metrics")
+st.caption("A plain-English guide to every score shown on this dashboard.")
+
+with st.expander("🟢 Overall Score — The Final Report Card", expanded=False):
+    st.markdown("""
+**What it is:** A single number (0 to 1) that combines all 5 evaluation metrics into one verdict.
+
+**How it is calculated:**
+| Metric | Weight | Why this weight |
+|---|---|---|
+| Factual Anchor Score | 25% | Most reliable — pure code, cannot be fooled |
+| Golden ROUGE-L | 25% | Mathematical ground truth — no LLM bias |
+| Faithfulness | 25% | Core RAG quality — is the answer grounded? |
+| Relevancy | 15% | Important but secondary to accuracy |
+| Completeness | 10% | Missing info is bad, but wrong info is worse |
+
+**Hard rule:** If Factual Anchor Score falls below 0.30, the Overall Score is capped at 0.45 regardless of other scores. A factually wrong agent cannot be rated "Good."
+
+**Score bands:**
+- 🟢 0.80 – 1.00 : **Good** — Agent is answering correctly and completely
+- 🟡 0.60 – 0.79 : **Warning** — Some issues detected, investigate flagged questions
+- 🔴 0.00 – 0.59 : **Poor** — Serious problems, agent needs attention
+    """)
+
+with st.expander("🔴 Factual Anchor Score (Layer 1) — The Only Metric With No AI", expanded=False):
+    st.markdown("""
+**What it is:** A pure code check that extracts every number, dollar amount, percentage, and time period from the agent's answer and verifies each one exists in the source document.
+
+**How it works (no LLM involved):**
+```
+Source says:  "Employees get 15 days of paid annual leave"
+Agent says:   "Employees get 15 days of paid leave"   → 15 found in source ✓ Score: 1.00
+Agent says:   "Employees get 30 days of paid leave"   → 30 NOT in source ✗ Score: 0.00
+```
+
+**Why it matters:** This is the only metric that cannot be fooled by a confident-sounding wrong answer. An LLM judge can be tricked; regex code cannot.
+
+**What a low score means:** The agent stated specific facts (numbers, dates, amounts) that are not in the source documents — i.e., hallucination.
+
+**What score 1.00 means:** Every specific fact in the answer came from the document. Note: 1.00 also appears when the answer has no specific facts to verify (e.g., "I don't know").
+    """)
+
+with st.expander("🟣 Golden ROUGE-L (Layer 2) — Math vs Ground Truth", expanded=False):
+    st.markdown("""
+**What it is:** A mathematical comparison between the agent's answer and a pre-generated "golden" reference answer created from the full policy document.
+
+**How the golden answer is created:** The system sends the complete document (not just retrieved chunks) to the LLM once, generates the ideal answer, and caches it permanently as the benchmark.
+
+**How ROUGE-L works:**
+```
+Golden:  "Employees receive 15 days of paid annual leave per calendar year"
+Agent:   "Employees are entitled to 15 days of paid leave annually"
+
+Longest Common Subsequence = "employees ... 15 days ... paid ... leave"
+ROUGE-L = 0.67  (reasonable match — same facts, slightly different words)
+```
+
+**Why it matters:** Even if the agent gives consistently wrong answers, ROUGE-L against the golden answer will always be low. Consistency alone does not protect a wrong answer.
+
+**What a low score means:** The agent's answer is very different from what the correct, complete answer should say — either wrong facts or missing key information.
+    """)
+
+with st.expander("🟢 Faithfulness (Layer 3) — Did the Agent Make Anything Up?", expanded=False):
+    st.markdown("""
+**What it is:** An LLM judge that compares the agent's answer against both the retrieved context AND the golden reference answer, checking for any invented or contradicted facts.
+
+**What the judge checks:**
+1. Does the agent's answer contradict the golden answer on any specific fact?
+2. Are there claims in the answer not supported by the retrieved document chunks?
+3. Is the answer overall faithful to the source material?
+
+**Example — Faithfulness 1.00:**
+> Agent says: "Failure to meet PIP targets may result in termination."
+> Policy says: "Failure to meet PIP targets may result in termination."
+> Verdict: Fully faithful ✓
+
+**Example — Faithfulness 0.00:**
+> Agent says: "Referrers are eligible for rewards even if hired for a different position."
+> Policy: No referral policy exists in the documents.
+> Verdict: Agent invented a policy ✗
+
+**What "Contradicts Golden" flag means:** The agent's answer directly conflicts with the verified reference answer on a specific factual claim. This is the most serious finding.
+    """)
+
+with st.expander("🟡 Relevancy (Layer 3) — Did the Agent Answer the Right Question?", expanded=False):
+    st.markdown("""
+**What it is:** An LLM judge that checks whether the agent's answer actually addresses what was asked, using the golden answer as a reference for what a relevant answer looks like.
+
+**Example — Relevancy 1.00:**
+> Question: "What are the consequences of failing a PIP?"
+> Agent: "Failure to meet PIP targets may result in termination."
+> Verdict: Directly answers the question ✓
+
+**Example — Relevancy 0.00:**
+> Question: "What must hourly employees do for payroll?"
+> Agent: "The policy context does not mention payroll requirements."
+> Verdict: The answer does not help the user at all ✗
+
+**What a low score means:** Two possible causes:
+1. The agent said "I don't know" when it should have known (retrieval gap)
+2. The agent answered a different question than what was asked
+
+**Important distinction:** An agent can score high on Faithfulness (didn't lie) but low on Relevancy (didn't answer). Both must be high for a truly good response.
+    """)
+
+with st.expander("🔵 Completeness (Layer 3) — Did the Agent Cover Everything?", expanded=False):
+    st.markdown("""
+**What it is:** An LLM judge that compares the agent's answer to the golden reference answer and identifies what key details are missing.
+
+**Example — Completeness 1.00:**
+> Golden answer mentions: "Submit within 30 days. Receipts required over $25. Use expense management system."
+> Agent answer covers: All three points ✓
+
+**Example — Completeness 0.30:**
+> Golden answer mentions: "Submit within 30 days. Receipts required over $25. Use expense management system."
+> Agent answer covers: "Submit within 30 days." only
+> Missing: Receipt requirement, submission system ✗
+
+**What a low score means:** The agent gave a correct but incomplete answer — it answered part of the question but left out important details that a user would need.
+
+**Why this has the lowest weight (10%):** Missing information is a problem, but providing wrong information is worse. An incomplete answer can be followed up; a wrong answer misleads the user.
+    """)
+
+with st.expander("📊 Consistency Score — Does the Agent Give the Same Answer Every Time?", expanded=False):
+    st.markdown("""
+**What it is:** A cross-run score that compares all answers to the same question across multiple test cycles and detects when the agent contradicts itself over time.
+
+**How it is calculated:**
+```
+For every pair of answers to the same question:
+  → Measure semantic similarity (0 to 1)
+  → Check if they factually contradict each other (yes/no)
+
+Consistency = avg_similarity × (1 − contradiction_rate) × (1 − drift)
+```
+
+**Three signals inside the consistency score:**
+| Signal | What it measures |
+|---|---|
+| Consistency Score | Overall agreement across all runs |
+| Contradiction Rate | % of run-pairs that factually conflict |
+| Drift Score | How different the latest answer is from the first answer |
+
+**Flagged if score < 0.75** — questions with a consistency score below 0.75 appear in the Consistency Alerts section with the specific contradiction highlighted.
+
+**Why this matters:** An agent that gives the right answer 9 times and the wrong answer once is more dangerous than one that is consistently mediocre — because users build trust in it and the one wrong answer is unexpected.
+    """)
+
+with st.expander("📐 Score Interpretation Quick Reference", expanded=False):
+    st.markdown("""
+| Score | Color | Meaning | Recommended Action |
+|---|---|---|---|
+| 0.80 – 1.00 | 🟢 Green | Agent performing well | No action needed |
+| 0.60 – 0.79 | 🟡 Yellow | Borderline — some issues | Review flagged questions |
+| 0.00 – 0.59 | 🔴 Red | Serious problem | Investigate and fix immediately |
+
+**Common patterns and what they mean:**
+
+| Pattern | Likely cause |
+|---|---|
+| High Factual, Low ROUGE-L | Agent answers correctly but incompletely |
+| High Faithfulness, Low Relevancy | Agent is honest but didn't answer the question |
+| High all scores, Low Consistency | Agent is non-deterministic — same Q, different A |
+| Low Factual (< 0.30) | Agent hallucinated specific facts — highest priority fix |
+| CONTRADICTS flag | Agent's answer directly conflicts with ground truth |
+| Context Precision low | Wrong document chunks being retrieved |
+| Context Recall low | Right chunks exist but retrieval missed them |
+    """)
+
+st.divider()
+st.caption("Dashboard auto-refreshes every 30 seconds | Evaluation powered by Groq / Azure OpenAI")
