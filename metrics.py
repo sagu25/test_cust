@@ -219,6 +219,11 @@ def compute_consistency_score(answers: list[str], question: str) -> dict:
             "contradiction_details": [],
         }
 
+    # Cap at last 10 answers to avoid 100s of pairwise LLM calls
+    MAX_WINDOW = 10
+    total_runs = len(answers)
+    answers = answers[-MAX_WINDOW:]
+
     similarities           = []
     contradictions         = []
     contradiction_details  = []
@@ -249,7 +254,7 @@ def compute_consistency_score(answers: list[str], question: str) -> dict:
         "consistency_score":    consistency_score,
         "contradiction_rate":   round(contradiction_rate, 4),
         "drift_score":          drift_score,
-        "total_runs":           len(answers),
+        "total_runs":           total_runs,
         "flagged":              consistency_score < 0.75,
         "contradiction_details": contradiction_details,
     }

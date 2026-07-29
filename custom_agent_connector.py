@@ -104,12 +104,21 @@ def _query_local(question: str) -> dict | None:
     try:
         from rag_app import retriever
         context_chunks = retriever.retrieve(question, top_k=4)
-    except Exception:
+        if not context_chunks:
+            print("[CustomAgent] WARNING: Retriever returned 0 chunks — "
+                  "check that rag_app/documents.py has content.")
+    except Exception as e:
+        print(f"[CustomAgent] ERROR loading documents from rag_app: {e}")
+        print("[CustomAgent] Agent will answer from LLM knowledge only (no document context).")
         context_chunks = []
 
     context_text = "\n\n".join(
         f"[{c['source']}] {c['text']}" for c in context_chunks
     )
+
+    if context_chunks:
+        print(f"[CustomAgent] Retrieved {len(context_chunks)} chunks from: "
+              f"{list(set(c['source'] for c in context_chunks))}")
 
     if context_text:
         user_content = (
