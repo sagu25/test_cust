@@ -100,34 +100,50 @@ def _query_local(question: str) -> dict | None:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import llm_client
 
-    # Pull context from the local document store
+    # Pull context from the local document store (top_k=6 for broader coverage)
     try:
         from rag_app import retriever
-        context_chunks = retriever.retrieve(question, top_k=4)
+        context_chunks = retriever.retrieve(question, top_k=6)
         if not context_chunks:
             print("[CustomAgent] WARNING: Retriever returned 0 chunks — "
                   "check that rag_app/documents.py has content.")
+        elif context_chunks[0]["score"] < 0.05:
+            print(f"[CustomAgent] WARNING: Best retrieval score is only "
+                  f"{context_chunks[0]['score']:.3f} — this question may not be "
+                  f"well covered by the documents.")
     except Exception as e:
         print(f"[CustomAgent] ERROR loading documents from rag_app: {e}")
         print("[CustomAgent] Agent will answer from LLM knowledge only (no document context).")
         context_chunks = []
 
-    context_text = "\n\n".join(
-        f"[{c['source']}] {c['text']}" for c in context_chunks
-    )
-
+    # Log exactly what was retrieved so retrieval issues are visible
     if context_chunks:
-        print(f"[CustomAgent] Retrieved {len(context_chunks)} chunks from: "
-              f"{list(set(c['source'] for c in context_chunks))}")
+        print(f"[CustomAgent] Retrieved {len(context_chunks)} chunks:")
+        for c in context_chunks:
+            print(f"  [{c['score']:.3f}] {c['source']}: {c['text'][:80].strip()}...")
+
+    context_text = "\n\n".join(
+        f"[SOURCE: {c['source']}]\n{c['text']}" for c in context_chunks
+    )
 
     if context_text:
         user_content = (
-            f"Context:\n{context_text}\n\n"
-            f"Question: {question}\n\n"
-            "Answer based only on the context above."
+            f"POLICY DOCUMENT EXCERPTS (this is your ONLY source of information):\n\n"
+            f"{context_text}\n\n"
+            f"---\n"
+            f"QUESTION: {question}\n\n"
+            f"INSTRUCTION: Answer using ONLY the exact figures, dates, and facts shown "
+            f"in the excerpts above. Do not use any other knowledge. "
+            f"If a specific number appears in the excerpts, quote it exactly as written. "
+            f"If the excerpts do not cover this question, say: "
+            f"'This is not covered in the policy documents.'"
         )
     else:
-        user_content = question
+        user_content = (
+            f"QUESTION: {question}\n\n"
+            "No policy document context is available for this question. "
+            "Say: 'This is not covered in the policy documents.'"
+        )
 
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -135,7 +151,7 @@ def _query_local(question: str) -> dict | None:
     ]
 
     try:
-        answer = llm_client.chat(messages, temperature=0.2)
+        answer = llm_client.chat(messages, temperature=0.0)
         return {
             "question":          question,
             "answer":            answer,
