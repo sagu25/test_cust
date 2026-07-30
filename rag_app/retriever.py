@@ -94,7 +94,7 @@ def _ensure_index():
         reload()
 
 
-def retrieve(query: str, top_k: int = 6) -> list[dict]:
+def retrieve(query: str, top_k: int = 4, max_per_source: int = 2) -> list[dict]:
     _ensure_index()
 
     # Expand query with synonyms to bridge vocabulary gaps
@@ -104,7 +104,7 @@ def retrieve(query: str, top_k: int = 6) -> list[dict]:
     scores    = cosine_similarity(query_vec, _matrix).flatten()
 
     # Pull a larger candidate pool before re-ranking
-    candidate_k = min(top_k * 3, len(_chunks))
+    candidate_k = min(top_k * 4, len(_chunks))
     top_idx     = np.argsort(scores)[::-1][:candidate_k]
 
     candidates = []
@@ -112,7 +112,6 @@ def retrieve(query: str, top_k: int = 6) -> list[dict]:
         if scores[idx] <= 0:
             continue
         kw_score = _keyword_overlap(query, _chunks[idx]["text"])
-        # Combined: TF-IDF similarity weighted higher, keyword overlap as tiebreaker
         combined = 0.65 * float(scores[idx]) + 0.35 * kw_score
         candidates.append({
             "source":   _chunks[idx]["source"],
@@ -123,8 +122,16 @@ def retrieve(query: str, top_k: int = 6) -> list[dict]:
 
     candidates.sort(key=lambda x: x["combined"], reverse=True)
 
+    # Cap chunks per source document to avoid one policy drowning out others
+    source_counts: dict[str, int] = {}
     results = []
-    for c in candidates[:top_k]:
+    for c in candidates:
+        if len(results) >= top_k:
+            break
+        count = source_counts.get(c["source"], 0)
+        if count >= max_per_source:
+            continue
+        source_counts[c["source"]] = count + 1
         results.append({
             "source": c["source"],
             "text":   c["text"],
