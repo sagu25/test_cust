@@ -94,7 +94,7 @@ def _ensure_index():
         reload()
 
 
-def retrieve(query: str, top_k: int = 4, max_per_source: int = 2) -> list[dict]:
+def retrieve(query: str, top_k: int = 4, score_threshold_ratio: float = 0.35) -> list[dict]:
     _ensure_index()
 
     # Expand query with synonyms to bridge vocabulary gaps
@@ -122,16 +122,22 @@ def retrieve(query: str, top_k: int = 4, max_per_source: int = 2) -> list[dict]:
 
     candidates.sort(key=lambda x: x["combined"], reverse=True)
 
-    # Cap chunks per source document to avoid one policy drowning out others
-    source_counts: dict[str, int] = {}
+    if not candidates:
+        return []
+
+    # Drop chunks that score much lower than the best chunk.
+    # A chunk scoring < 35% of the top score is likely from an unrelated document
+    # and introduces noise. This is adaptive — if you add new documents, the
+    # threshold adjusts automatically based on actual scores.
+    top_score = candidates[0]["combined"]
+    min_score = top_score * score_threshold_ratio
+
     results = []
     for c in candidates:
         if len(results) >= top_k:
             break
-        count = source_counts.get(c["source"], 0)
-        if count >= max_per_source:
-            continue
-        source_counts[c["source"]] = count + 1
+        if c["combined"] < min_score:
+            break
         results.append({
             "source": c["source"],
             "text":   c["text"],

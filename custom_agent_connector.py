@@ -103,7 +103,7 @@ def _query_local(question: str) -> dict | None:
     # Pull context from the local document store (top_k=6 for broader coverage)
     try:
         from rag_app import retriever
-        context_chunks = retriever.retrieve(question, top_k=4, max_per_source=2)
+        context_chunks = retriever.retrieve(question, top_k=4)
         if not context_chunks:
             print("[CustomAgent] WARNING: Retriever returned 0 chunks — "
                   "check that rag_app/documents.py has content.")
