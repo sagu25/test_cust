@@ -40,19 +40,11 @@ def _use_embedding() -> bool:
     api_key  = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
     endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
 
-    print(f"[Retriever] DEBUG _use_embedding check:")
-    print(f"  .env path        : '{_ENV_PATH}'")
-    print(f"  .env exists      : {os.path.exists(_ENV_PATH)}")
-    print(f"  EMBED_DEPLOYMENT : '{key}'")
-    print(f"  API_KEY (first 8): '{api_key[:8] if api_key else 'EMPTY'}'")
-    print(f"  ENDPOINT         : '{endpoint[:50] if endpoint else 'EMPTY'}'")
-
     result = bool(
         key and api_key and endpoint
         and not any(p in api_key.lower()  for p in _PLACEHOLDER)
         and not any(p in endpoint.lower() for p in _PLACEHOLDER)
     )
-    print(f"  USE_EMBEDDING    : {result}")
     return result
 
 # ── Shared state ──────────────────────────────────────────────────────────────

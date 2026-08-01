@@ -103,15 +103,20 @@ def _query_local(question: str) -> dict | None:
     # Pull context from the local document store
     try:
         from rag_app import retriever
+
+        # Confidence gate threshold differs by retrieval mode:
+        # Embedding cosine similarity: even unrelated chunks score 0.20-0.40
+        # TF-IDF: unrelated chunks score near 0.00-0.08
+        use_embedding = retriever._use_embedding()
+        gate_threshold = 0.42 if use_embedding else 0.08
+
         context_chunks = retriever.retrieve(question, top_k=4)
         if not context_chunks:
-            print("[CustomAgent] WARNING: Retriever returned 0 chunks — "
-                  "check that rag_app/documents.py has content.")
-        elif context_chunks[0]["score"] < 0.08:
-            # Confidence gate: score too low means no relevant document exists
-            # Return a definitive "not covered" answer instead of risking hallucination
+            print("[CustomAgent] WARNING: Retriever returned 0 chunks.")
+        elif context_chunks[0]["score"] < gate_threshold:
             print(f"[CustomAgent] Confidence gate triggered "
-                  f"(best score {context_chunks[0]['score']:.3f} < 0.08) — "
+                  f"(best score {context_chunks[0]['score']:.3f} < {gate_threshold} "
+                  f"[{'embedding' if use_embedding else 'tfidf'} mode]) — "
                   f"topic not covered in documents.")
             return {
                 "question":          question,
@@ -121,7 +126,6 @@ def _query_local(question: str) -> dict | None:
             }
     except Exception as e:
         print(f"[CustomAgent] ERROR loading documents from rag_app: {e}")
-        print("[CustomAgent] Agent will answer from LLM knowledge only (no document context).")
         context_chunks = []
 
     # Log exactly what was retrieved so retrieval issues are visible
@@ -136,21 +140,25 @@ def _query_local(question: str) -> dict | None:
 
     if context_text:
         user_content = (
-            f"POLICY DOCUMENT EXCERPTS (this is your ONLY source of information):\n\n"
+            f"POLICY DOCUMENT EXCERPTS:\n\n"
             f"{context_text}\n\n"
             f"---\n"
             f"QUESTION: {question}\n\n"
-            f"INSTRUCTION: Answer using ONLY the exact figures, dates, and facts shown "
-            f"in the excerpts above. Do not use any other knowledge. "
-            f"If a specific number appears in the excerpts, quote it exactly as written. "
-            f"If the excerpts do not cover this question, say: "
-            f"'This is not covered in the policy documents.'"
+            f"RULES — READ CAREFULLY:\n"
+            f"1. Use ONLY the numbers, dates, and facts shown in the excerpts above.\n"
+            f"2. If an excerpt says '$1,500' do not change it to any other number.\n"
+            f"3. If an excerpt says '30 days' do not change it to weeks or months.\n"
+            f"4. Do NOT use your training knowledge — only what is written above.\n"
+            f"5. If the excerpts do not answer the question, say exactly: "
+            f"'This is not covered in the policy documents.'\n"
+            f"6. Quote specific figures directly from the excerpts — do not paraphrase numbers."
         )
     else:
         user_content = (
             f"QUESTION: {question}\n\n"
-            "No policy document context is available for this question. "
-            "Say: 'This is not covered in the policy documents.'"
+            "There are no policy document excerpts available for this question.\n"
+            "You MUST say: 'This is not covered in the policy documents.'\n"
+            "Do not attempt to answer from your own knowledge."
         )
 
     messages = [
