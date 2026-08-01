@@ -23,7 +23,10 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity as _sklearn_cosine
 
 from dotenv import load_dotenv
-load_dotenv()
+
+# Load .env from the eval_system root (one level up from rag_app/)
+_ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+load_dotenv(_ENV_PATH, override=True)
 
 _PLACEHOLDER = {"your_azure", "your-resource", "placeholder", ""}
 
