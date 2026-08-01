@@ -28,7 +28,7 @@ from dotenv import load_dotenv
 _ENV_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
 load_dotenv(_ENV_PATH, override=True)
 
-_PLACEHOLDER = {"your_azure", "your-resource", "placeholder", ""}
+_PLACEHOLDER = {"your_azure", "your-resource", "placeholder"}
 
 
 def _use_embedding() -> bool:
