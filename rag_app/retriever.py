@@ -25,20 +25,19 @@ from sklearn.metrics.pairwise import cosine_similarity as _sklearn_cosine
 from dotenv import load_dotenv
 load_dotenv()
 
-# ── Embedding config ──────────────────────────────────────────────────────────
-_EMBED_DEPLOYMENT = os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME", "").strip()
-_AZURE_KEY        = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
-_AZURE_ENDPOINT   = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
-_AZURE_VERSION    = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01").strip()
+_PLACEHOLDER = {"your_azure", "your-resource", "placeholder", ""}
 
-_PLACEHOLDER      = {"your_azure", "your-resource", "placeholder", ""}
-_USE_EMBEDDING    = bool(
-    _EMBED_DEPLOYMENT
-    and _AZURE_KEY
-    and _AZURE_ENDPOINT
-    and not any(p in _AZURE_KEY.lower() for p in _PLACEHOLDER)
-    and not any(p in _AZURE_ENDPOINT.lower() for p in _PLACEHOLDER)
-)
+
+def _use_embedding() -> bool:
+    """Check at runtime (not import time) so .env is always fully loaded."""
+    key      = os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME", "").strip()
+    api_key  = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
+    endpoint = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
+    return bool(
+        key and api_key and endpoint
+        and not any(p in api_key.lower()  for p in _PLACEHOLDER)
+        and not any(p in endpoint.lower() for p in _PLACEHOLDER)
+    )
 
 # ── Shared state ──────────────────────────────────────────────────────────────
 _chunks: list[dict] = []
@@ -93,9 +92,9 @@ def _build_chunks(documents: list[dict]) -> list[dict]:
 def _get_embed_client():
     from openai import AzureOpenAI
     return AzureOpenAI(
-        api_key=_AZURE_KEY,
-        azure_endpoint=_AZURE_ENDPOINT,
-        api_version=_AZURE_VERSION,
+        api_key=os.getenv("AZURE_OPENAI_API_KEY", ""),
+        azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT", ""),
+        api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01"),
     )
 
 
@@ -106,7 +105,10 @@ def _embed_texts(texts: list[str]) -> np.ndarray:
     batch_size = 16
     for i in range(0, len(texts), batch_size):
         batch    = texts[i : i + batch_size]
-        response = client.embeddings.create(input=batch, model=_EMBED_DEPLOYMENT)
+        response = client.embeddings.create(
+            input=batch,
+            model=os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME", "").strip()
+        )
         vectors.extend([item.embedding for item in response.data])
     return np.array(vectors, dtype=np.float32)
 
@@ -148,9 +150,10 @@ def _build_index(documents: list[dict]):
     _chunks = _build_chunks(documents)
     texts   = [c["text"] for c in _chunks]
 
-    if _USE_EMBEDDING:
+    if _use_embedding():
+        deploy = os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME", "").strip()
         print(f"[Retriever] Building EMBEDDING index ({len(_chunks)} chunks) "
-              f"using deployment: {_EMBED_DEPLOYMENT}")
+              f"using deployment: {deploy}")
         try:
             _chunk_embeddings = _embed_texts(texts)
             print(f"[Retriever] Embedding index ready — shape {_chunk_embeddings.shape}")
@@ -186,7 +189,7 @@ def retrieve(query: str, top_k: int = 4,
              score_threshold_ratio: float = 0.35) -> list[dict]:
     _ensure_index()
 
-    if _USE_EMBEDDING and _chunk_embeddings is not None:
+    if _use_embedding() and _chunk_embeddings is not None:
         return _retrieve_embedding(query, top_k, score_threshold_ratio)
     return _retrieve_tfidf(query, top_k, score_threshold_ratio)
 
