@@ -100,17 +100,25 @@ def _query_local(question: str) -> dict | None:
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     import llm_client
 
-    # Pull context from the local document store (top_k=6 for broader coverage)
+    # Pull context from the local document store
     try:
         from rag_app import retriever
         context_chunks = retriever.retrieve(question, top_k=4)
         if not context_chunks:
             print("[CustomAgent] WARNING: Retriever returned 0 chunks — "
                   "check that rag_app/documents.py has content.")
-        elif context_chunks[0]["score"] < 0.05:
-            print(f"[CustomAgent] WARNING: Best retrieval score is only "
-                  f"{context_chunks[0]['score']:.3f} — this question may not be "
-                  f"well covered by the documents.")
+        elif context_chunks[0]["score"] < 0.08:
+            # Confidence gate: score too low means no relevant document exists
+            # Return a definitive "not covered" answer instead of risking hallucination
+            print(f"[CustomAgent] Confidence gate triggered "
+                  f"(best score {context_chunks[0]['score']:.3f} < 0.08) — "
+                  f"topic not covered in documents.")
+            return {
+                "question":          question,
+                "answer":            "This topic is not covered in the policy documents.",
+                "retrieved_context": [],
+                "sources":           [],
+            }
     except Exception as e:
         print(f"[CustomAgent] ERROR loading documents from rag_app: {e}")
         print("[CustomAgent] Agent will answer from LLM knowledge only (no document context).")

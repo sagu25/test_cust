@@ -1,30 +1,71 @@
+"""
+Document retriever — two modes selected automatically:
+
+  EMBEDDING mode  (recommended)
+    Activated when AZURE_EMBEDDING_DEPLOYMENT_NAME is set in .env
+    Uses Azure OpenAI text-embedding model for semantic search.
+    "training expenses" correctly matches "learning budget" because
+    embeddings understand meaning, not just keywords.
+
+  TF-IDF mode  (fallback)
+    Used when Azure embedding credentials are not configured.
+    Keyword-based search — fast, free, no API needed.
+    Includes synonym expansion and hybrid re-ranking to compensate
+    for vocabulary gaps.
+
+No code changes needed when switching modes — just set or unset
+AZURE_EMBEDDING_DEPLOYMENT_NAME in your .env file.
+"""
+import os
 import re
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 import numpy as np
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity as _sklearn_cosine
 
+from dotenv import load_dotenv
+load_dotenv()
 
-_vectorizer = None
-_matrix     = None
-_chunks     = []
+# ── Embedding config ──────────────────────────────────────────────────────────
+_EMBED_DEPLOYMENT = os.getenv("AZURE_EMBEDDING_DEPLOYMENT_NAME", "").strip()
+_AZURE_KEY        = os.getenv("AZURE_OPENAI_API_KEY", "").strip()
+_AZURE_ENDPOINT   = os.getenv("AZURE_OPENAI_ENDPOINT", "").strip()
+_AZURE_VERSION    = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01").strip()
 
-# Synonym map for common policy terms that differ between questions and documents
+_PLACEHOLDER      = {"your_azure", "your-resource", "placeholder", ""}
+_USE_EMBEDDING    = bool(
+    _EMBED_DEPLOYMENT
+    and _AZURE_KEY
+    and _AZURE_ENDPOINT
+    and not any(p in _AZURE_KEY.lower() for p in _PLACEHOLDER)
+    and not any(p in _AZURE_ENDPOINT.lower() for p in _PLACEHOLDER)
+)
+
+# ── Shared state ──────────────────────────────────────────────────────────────
+_chunks: list[dict] = []
+
+# TF-IDF state
+_vectorizer  = None
+_tfidf_matrix = None
+
+# Embedding state
+_chunk_embeddings: np.ndarray | None = None   # shape (n_chunks, dim)
+
+# ── TF-IDF synonyms (only used in TF-IDF fallback mode) ──────────────────────
 _SYNONYMS = {
-    "training":      ["learning", "professional development", "education", "courses"],
-    "educational":   ["learning", "training", "professional development"],
-    "expenses":      ["budget", "reimbursement", "allowance", "costs", "claims"],
-    "expense":       ["budget", "reimbursement", "allowance", "cost", "claim"],
-    "vacation":      ["annual leave", "leave", "holiday", "paid leave"],
-    "sick":          ["medical", "illness", "health", "unwell"],
-    "pay":           ["salary", "compensation", "remuneration"],
-    "raise":         ["salary increase", "increment", "merit increase"],
-    "fire":          ["termination", "dismissed", "terminate"],
-    "fired":         ["terminated", "dismissed", "termination"],
-    "bonus":         ["incentive", "reward", "allowance"],
-    "work from home": ["remote work", "remote", "wfh"],
-    "wfh":           ["remote work", "work from home", "remote"],
-    "promotion":     ["career growth", "advancement", "rating"],
-    "annual budget": ["yearly budget", "per year", "each year", "annual learning budget"],
+    "training":       ["learning", "professional development", "education", "courses"],
+    "educational":    ["learning", "training", "professional development"],
+    "expenses":       ["budget", "reimbursement", "allowance", "costs", "claims"],
+    "expense":        ["budget", "reimbursement", "allowance", "cost", "claim"],
+    "vacation":       ["annual leave", "leave", "holiday", "paid leave"],
+    "sick":           ["medical", "illness", "health"],
+    "pay":            ["salary", "compensation", "remuneration"],
+    "raise":          ["salary increase", "increment"],
+    "fire":           ["termination", "dismissed", "terminate"],
+    "fired":          ["terminated", "dismissed", "termination"],
+    "bonus":          ["incentive", "reward", "allowance"],
+    "wfh":            ["remote work", "work from home", "remote"],
+    "work from home": ["remote work", "wfh", "remote"],
+    "promotion":      ["career growth", "advancement", "rating"],
 }
 
 _STOP = {
@@ -36,35 +77,7 @@ _STOP = {
 }
 
 
-def _expand_query(query: str) -> str:
-    """Add synonym expansions so TF-IDF can bridge word mismatches."""
-    q_lower = query.lower()
-    extras  = []
-
-    # Multi-word synonyms first
-    for term, synonyms in _SYNONYMS.items():
-        if term in q_lower:
-            extras.extend(synonyms)
-
-    # Single-word synonyms
-    for word in re.findall(r"\b\w+\b", q_lower):
-        if word in _SYNONYMS:
-            extras.extend(_SYNONYMS[word])
-
-    if extras:
-        return query + " " + " ".join(extras)
-    return query
-
-
-def _keyword_overlap(query: str, chunk_text: str) -> float:
-    """Fraction of meaningful query words that appear in the chunk."""
-    words = {w.lower() for w in re.findall(r"\b\w{3,}\b", query)} - _STOP
-    if not words:
-        return 0.0
-    chunk_lower = chunk_text.lower()
-    hits = sum(1 for w in words if w in chunk_lower)
-    return hits / len(words)
-
+# ── Chunk building ────────────────────────────────────────────────────────────
 
 def _build_chunks(documents: list[dict]) -> list[dict]:
     chunks = []
@@ -75,35 +88,140 @@ def _build_chunks(documents: list[dict]) -> list[dict]:
     return chunks
 
 
+# ── Embedding helpers ─────────────────────────────────────────────────────────
+
+def _get_embed_client():
+    from openai import AzureOpenAI
+    return AzureOpenAI(
+        api_key=_AZURE_KEY,
+        azure_endpoint=_AZURE_ENDPOINT,
+        api_version=_AZURE_VERSION,
+    )
+
+
+def _embed_texts(texts: list[str]) -> np.ndarray:
+    """Embed a list of texts in batches of 16. Returns (n, dim) array."""
+    client  = _get_embed_client()
+    vectors = []
+    batch_size = 16
+    for i in range(0, len(texts), batch_size):
+        batch    = texts[i : i + batch_size]
+        response = client.embeddings.create(input=batch, model=_EMBED_DEPLOYMENT)
+        vectors.extend([item.embedding for item in response.data])
+    return np.array(vectors, dtype=np.float32)
+
+
+def _cosine_sim(query_vec: np.ndarray, matrix: np.ndarray) -> np.ndarray:
+    """Cosine similarity between a single query vector and a matrix of vectors."""
+    q_norm = query_vec / (np.linalg.norm(query_vec) + 1e-10)
+    norms  = np.linalg.norm(matrix, axis=1, keepdims=True) + 1e-10
+    normed = matrix / norms
+    return normed @ q_norm
+
+
+# ── TF-IDF helpers ────────────────────────────────────────────────────────────
+
+def _expand_query(query: str) -> str:
+    q_lower = query.lower()
+    extras  = []
+    for term, synonyms in _SYNONYMS.items():
+        if term in q_lower:
+            extras.extend(synonyms)
+    for word in re.findall(r"\b\w+\b", q_lower):
+        if word in _SYNONYMS:
+            extras.extend(_SYNONYMS[word])
+    return (query + " " + " ".join(extras)) if extras else query
+
+
+def _keyword_overlap(query: str, chunk_text: str) -> float:
+    words = {w.lower() for w in re.findall(r"\b\w{3,}\b", query)} - _STOP
+    if not words:
+        return 0.0
+    chunk_lower = chunk_text.lower()
+    return sum(1 for w in words if w in chunk_lower) / len(words)
+
+
+# ── Index building ────────────────────────────────────────────────────────────
+
 def _build_index(documents: list[dict]):
-    global _vectorizer, _matrix, _chunks
-    _chunks     = _build_chunks(documents)
-    texts       = [c["text"] for c in _chunks]
-    _vectorizer = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
-    _matrix     = _vectorizer.fit_transform(texts)
+    global _vectorizer, _tfidf_matrix, _chunk_embeddings, _chunks
+    _chunks = _build_chunks(documents)
+    texts   = [c["text"] for c in _chunks]
+
+    if _USE_EMBEDDING:
+        print(f"[Retriever] Building EMBEDDING index ({len(_chunks)} chunks) "
+              f"using deployment: {_EMBED_DEPLOYMENT}")
+        try:
+            _chunk_embeddings = _embed_texts(texts)
+            print(f"[Retriever] Embedding index ready — shape {_chunk_embeddings.shape}")
+        except Exception as e:
+            print(f"[Retriever] Embedding failed ({e}). Falling back to TF-IDF.")
+            _chunk_embeddings = None
+            _build_tfidf(texts)
+    else:
+        print(f"[Retriever] Building TF-IDF index ({len(_chunks)} chunks)")
+        _build_tfidf(texts)
+
+
+def _build_tfidf(texts: list[str]):
+    global _vectorizer, _tfidf_matrix
+    _vectorizer   = TfidfVectorizer(stop_words="english", ngram_range=(1, 2))
+    _tfidf_matrix = _vectorizer.fit_transform(texts)
 
 
 def reload():
-    """Rebuild index from current document store (call after upload)."""
+    """Rebuild index from current document store."""
     from rag_app.document_store import get_all_documents
     _build_index(get_all_documents())
 
 
 def _ensure_index():
-    if _vectorizer is None:
+    if not _chunks:
         reload()
 
 
-def retrieve(query: str, top_k: int = 4, score_threshold_ratio: float = 0.35) -> list[dict]:
+# ── Retrieval ─────────────────────────────────────────────────────────────────
+
+def retrieve(query: str, top_k: int = 4,
+             score_threshold_ratio: float = 0.35) -> list[dict]:
     _ensure_index()
 
-    # Expand query with synonyms to bridge vocabulary gaps
-    expanded_query = _expand_query(query)
+    if _USE_EMBEDDING and _chunk_embeddings is not None:
+        return _retrieve_embedding(query, top_k, score_threshold_ratio)
+    return _retrieve_tfidf(query, top_k, score_threshold_ratio)
 
-    query_vec = _vectorizer.transform([expanded_query])
-    scores    = cosine_similarity(query_vec, _matrix).flatten()
 
-    # Pull a larger candidate pool before re-ranking
+def _retrieve_embedding(query: str, top_k: int,
+                        score_threshold_ratio: float) -> list[dict]:
+    try:
+        query_vec = _embed_texts([query])[0]
+        scores    = _cosine_sim(query_vec, _chunk_embeddings)
+
+        top_idx = np.argsort(scores)[::-1][:top_k * 4]
+        candidates = [
+            {
+                "source": _chunks[i]["source"],
+                "text":   _chunks[i]["text"],
+                "score":  float(scores[i]),
+            }
+            for i in top_idx if scores[i] > 0
+        ]
+    except Exception as e:
+        print(f"[Retriever] Embedding retrieval error ({e}). Falling back to TF-IDF.")
+        return _retrieve_tfidf(query, top_k, score_threshold_ratio)
+
+    return _apply_threshold(candidates, top_k, score_threshold_ratio)
+
+
+def _retrieve_tfidf(query: str, top_k: int,
+                    score_threshold_ratio: float) -> list[dict]:
+    if _vectorizer is None:
+        _build_tfidf([c["text"] for c in _chunks])
+
+    expanded  = _expand_query(query)
+    query_vec = _vectorizer.transform([expanded])
+    scores    = _sklearn_cosine(query_vec, _tfidf_matrix).flatten()
+
     candidate_k = min(top_k * 4, len(_chunks))
     top_idx     = np.argsort(scores)[::-1][:candidate_k]
 
@@ -111,36 +229,31 @@ def retrieve(query: str, top_k: int = 4, score_threshold_ratio: float = 0.35) ->
     for idx in top_idx:
         if scores[idx] <= 0:
             continue
-        kw_score = _keyword_overlap(query, _chunks[idx]["text"])
-        combined = 0.65 * float(scores[idx]) + 0.35 * kw_score
+        kw    = _keyword_overlap(query, _chunks[idx]["text"])
+        combined = 0.65 * float(scores[idx]) + 0.35 * kw
         candidates.append({
-            "source":   _chunks[idx]["source"],
-            "text":     _chunks[idx]["text"],
-            "score":    float(scores[idx]),
-            "combined": combined,
+            "source": _chunks[idx]["source"],
+            "text":   _chunks[idx]["text"],
+            "score":  combined,
         })
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    return _apply_threshold(candidates, top_k, score_threshold_ratio)
 
-    candidates.sort(key=lambda x: x["combined"], reverse=True)
 
+def _apply_threshold(candidates: list[dict], top_k: int,
+                     ratio: float) -> list[dict]:
     if not candidates:
         return []
-
-    # Drop chunks that score much lower than the best chunk.
-    # A chunk scoring < 35% of the top score is likely from an unrelated document
-    # and introduces noise. This is adaptive — if you add new documents, the
-    # threshold adjusts automatically based on actual scores.
-    top_score = candidates[0]["combined"]
-    min_score = top_score * score_threshold_ratio
-
-    results = []
+    min_score = candidates[0]["score"] * ratio
+    results   = []
     for c in candidates:
         if len(results) >= top_k:
             break
-        if c["combined"] < min_score:
+        if c["score"] < min_score:
             break
         results.append({
             "source": c["source"],
             "text":   c["text"],
-            "score":  round(c["combined"], 4),
+            "score":  round(c["score"], 4),
         })
     return results
