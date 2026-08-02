@@ -144,14 +144,14 @@ def _query_local(question: str) -> dict | None:
             f"{context_text}\n\n"
             f"---\n"
             f"QUESTION: {question}\n\n"
-            f"RULES — READ CAREFULLY:\n"
-            f"1. Use ONLY the numbers, dates, and facts shown in the excerpts above.\n"
-            f"2. If an excerpt says '$1,500' do not change it to any other number.\n"
-            f"3. If an excerpt says '30 days' do not change it to weeks or months.\n"
-            f"4. Do NOT use your training knowledge — only what is written above.\n"
-            f"5. If the excerpts do not answer the question, say exactly: "
-            f"'This is not covered in the policy documents.'\n"
-            f"6. Quote specific figures directly from the excerpts — do not paraphrase numbers."
+            f"STEP 1 — Find and quote the exact sentence(s) from the excerpts above "
+            f"that contain the answer. Copy them word for word. "
+            f"If no sentence answers the question, write: "
+            f"'No relevant sentence found in excerpts.'\n\n"
+            f"STEP 2 — Using ONLY what you quoted in Step 1, write a clear answer. "
+            f"Do not add, change, or remove any number, date, or amount from the quote. "
+            f"Do not use your training knowledge. "
+            f"If Step 1 found nothing, say: 'This is not covered in the policy documents.'"
         )
     else:
         user_content = (
