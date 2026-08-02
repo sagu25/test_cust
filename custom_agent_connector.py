@@ -165,16 +165,13 @@ def _query_local(question: str) -> dict | None:
     try:
         answer = llm_client.chat(messages, temperature=0.0)
 
-        # If Step 1 found no quote, the LLM sometimes still answers from memory in Step 2.
-        # Intercept and enforce the "not covered" response.
+        # If Step 1 found no quote, enforce "not covered" response.
+        # Only match the exact Step 1 failure phrase — broad matches like "cannot find"
+        # were incorrectly intercepting valid answers containing those words.
         answer_lower = answer.lower()
-        if (
-            "no relevant sentence found" in answer_lower
-            or "not found in excerpts" in answer_lower
-            or "cannot find" in answer_lower
-            or "no sentence" in answer_lower
-        ):
+        if "no relevant sentence found in excerpts" in answer_lower:
             answer = "This is not covered in the policy documents."
+            print("[CustomAgent] Intercept fired — LLM found no quote in Step 1.")
 
         return {
             "question":          question,
