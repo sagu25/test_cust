@@ -153,19 +153,43 @@ with st.sidebar:
 
     try:
         from rag_app.document_store import (
-            get_all_documents, get_uploaded_documents,
+            get_all_documents_unfiltered, get_uploaded_documents,
             add_document, remove_document,
+            get_active_titles, set_active_titles,
         )
         from rag_app import retriever as _retriever
 
-        all_docs      = get_all_documents()
-        uploaded_docs = get_uploaded_documents()
-        uploaded_titles = {d["title"] for d in uploaded_docs}
+        all_docs_unfiltered = get_all_documents_unfiltered()
+        uploaded_docs       = get_uploaded_documents()
+        uploaded_titles     = {d["title"] for d in uploaded_docs}
 
-        st.caption(f"{len(all_docs)} document(s) in knowledge base")
-        for doc in all_docs:
-            icon = "📄" if doc["title"] in uploaded_titles else "🔒"
-            st.caption(f"{icon} {doc['title']} ({len(doc['content']):,} chars)")
+        # Current active selection (None = all active, backward-compatible)
+        current_active = get_active_titles()
+        if current_active is None:
+            current_active = {d["title"] for d in all_docs_unfiltered}
+
+        st.caption(f"{len(all_docs_unfiltered)} document(s) available — check to activate:")
+        new_active = set()
+        for doc in all_docs_unfiltered:
+            icon    = "📄" if doc["title"] in uploaded_titles else "🔒"
+            checked = st.checkbox(
+                f"{icon} {doc['title']}",
+                value=(doc["title"] in current_active),
+                key=f"doc_active_{doc['title']}",
+            )
+            if checked:
+                new_active.add(doc["title"])
+
+        if new_active != current_active:
+            set_active_titles(list(new_active))
+            _reset_questions()
+            _retriever.reload()
+            active_count = len(new_active)
+            st.success(
+                f"Selection saved ({active_count} active). "
+                f"Questions will regenerate on the next orchestrator cycle."
+            )
+            st.rerun()
 
         st.divider()
 

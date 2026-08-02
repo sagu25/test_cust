@@ -57,11 +57,16 @@ _tfidf_matrix = None
 # Embedding state
 _chunk_embeddings: np.ndarray | None = None   # shape (n_chunks, dim)
 
-# Track uploads/meta.json modification time to auto-reload when docs change
-_last_meta_mtime: float = 0.0
-_UPLOADS_META = os.path.join(
+# Track uploads/meta.json AND active_docs.json modification times to auto-reload
+_last_meta_mtime: float   = 0.0
+_last_active_mtime: float = 0.0
+_UPLOADS_META   = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "uploads", "meta.json",
+)
+_ACTIVE_DOCS    = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "uploads", "active_docs.json",
 )
 
 # ── TF-IDF synonyms (only used in TF-IDF fallback mode) ──────────────────────
@@ -194,13 +199,13 @@ def reload():
 
 
 def _ensure_index():
-    global _last_meta_mtime
-    current_mtime = (
-        os.path.getmtime(_UPLOADS_META) if os.path.exists(_UPLOADS_META) else 0.0
-    )
-    if not _chunks or current_mtime != _last_meta_mtime:
+    global _last_meta_mtime, _last_active_mtime
+    meta_mtime   = os.path.getmtime(_UPLOADS_META)   if os.path.exists(_UPLOADS_META)   else 0.0
+    active_mtime = os.path.getmtime(_ACTIVE_DOCS)    if os.path.exists(_ACTIVE_DOCS)    else 0.0
+    if not _chunks or meta_mtime != _last_meta_mtime or active_mtime != _last_active_mtime:
         reload()
-        _last_meta_mtime = current_mtime
+        _last_meta_mtime   = meta_mtime
+        _last_active_mtime = active_mtime
 
 
 # ── Retrieval ─────────────────────────────────────────────────────────────────
