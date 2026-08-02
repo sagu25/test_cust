@@ -366,7 +366,7 @@ questions = df["question"].unique()
 cons_map = {}
 if not cons_df.empty:
     for _, row in cons_df.iterrows():
-        cons_map[row["question"]] = row
+        cons_map[row["question"]] = row.to_dict()
 
 for q in questions:
     q_df = df[df["question"] == q].reset_index(drop=True)
