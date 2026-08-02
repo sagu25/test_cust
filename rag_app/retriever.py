@@ -102,8 +102,17 @@ def _build_chunks(documents: list[dict]) -> list[dict]:
     chunks = []
     for doc in documents:
         paragraphs = [p.strip() for p in doc["content"].split("\n\n") if p.strip()]
+        pending = ""
         for para in paragraphs:
-            chunks.append({"source": doc["title"], "text": para})
+            combined = (pending + " " + para).strip() if pending else para
+            if len(combined) < 200:
+                # Too short to be useful on its own — merge with next paragraph
+                pending = combined
+            else:
+                chunks.append({"source": doc["title"], "text": combined})
+                pending = ""
+        if pending and len(pending) > 50:
+            chunks.append({"source": doc["title"], "text": pending})
     return chunks
 
 
