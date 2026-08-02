@@ -108,7 +108,7 @@ def _query_local(question: str) -> dict | None:
         # Embedding cosine similarity: even unrelated chunks score 0.20-0.40
         # TF-IDF: unrelated chunks score near 0.00-0.08
         use_embedding = retriever._use_embedding()
-        gate_threshold = 0.42 if use_embedding else 0.08
+        gate_threshold = 0.50 if use_embedding else 0.08
 
         context_chunks = retriever.retrieve(question, top_k=4)
         if not context_chunks:
@@ -179,6 +179,18 @@ def _query_local(question: str) -> dict | None:
 
     try:
         answer = llm_client.chat(messages, temperature=0.0)
+
+        # If Step 1 found no quote, the LLM sometimes still answers from memory in Step 2.
+        # Intercept and enforce the "not covered" response.
+        answer_lower = answer.lower()
+        if (
+            "no relevant sentence found" in answer_lower
+            or "not found in excerpts" in answer_lower
+            or "cannot find" in answer_lower
+            or "no sentence" in answer_lower
+        ):
+            answer = "This is not covered in the policy documents."
+
         return {
             "question":          question,
             "answer":            answer,
