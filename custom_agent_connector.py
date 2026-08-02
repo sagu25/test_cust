@@ -103,7 +103,7 @@ def _query_local(question: str) -> dict | None:
     # Pull context from the local document store
     try:
         from rag_app import retriever
-        context_chunks = retriever.retrieve(question, top_k=4)
+        context_chunks = retriever.retrieve(question, top_k=6)
         if not context_chunks:
             print("[CustomAgent] WARNING: Retriever returned 0 chunks.")
         else:
@@ -125,17 +125,17 @@ def _query_local(question: str) -> dict | None:
 
     if context_text:
         user_content = (
-            f"POLICY DOCUMENT EXCERPTS:\n\n"
+            f"DOCUMENT EXCERPTS:\n\n"
             f"{context_text}\n\n"
             f"---\n"
             f"QUESTION: {question}\n\n"
-            f"STEP 1 — Find and quote the exact sentence(s) from the excerpts above "
-            f"that contain the answer. Copy them word for word. "
-            f"If no sentence answers the question, write: "
+            f"STEP 1 — Copy the most relevant passage (1-3 sentences) from the excerpts "
+            f"above that helps answer the question. "
+            f"If the excerpts contain nothing relevant at all, write exactly: "
             f"'No relevant sentence found in excerpts.'\n\n"
-            f"STEP 2 — Using ONLY what you quoted in Step 1, write a clear answer. "
-            f"Do not add, change, or remove any number, date, or amount from the quote. "
-            f"Do not use your training knowledge. "
+            f"STEP 2 — Using ONLY what you copied in Step 1, write a clear and direct answer. "
+            f"Do not add any information not present in Step 1. "
+            f"Do not use your own knowledge. "
             f"If Step 1 found nothing, say: 'This is not covered in the policy documents.'"
         )
     else:
