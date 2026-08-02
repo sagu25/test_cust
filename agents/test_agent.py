@@ -115,6 +115,65 @@ def get_prioritized_questions(all_questions: list[dict], n: int) -> list[str]:
 
 # ── Question Generation ───────────────────────────────────────────────────────
 
+def _questions_from_one_doc(title: str, content: str, count: int = 3) -> list[dict]:
+    """Generate `count` questions that are answerable ONLY from this single document."""
+    import re
+    prompt = f"""You are a QA engineer. Below is ONE policy document.
+Generate exactly {count} test questions whose answers can be found as EXPLICIT sentences or numbers in this document.
+
+DOCUMENT: {title}
+---
+{content[:3000]}
+---
+
+STRICT RULES:
+1. Every answer must exist as a direct quote in the text above — NOT inferred or implied.
+2. Only ask about specific numbers, names, limits, dates, percentages, or defined processes.
+3. Do NOT ask vague questions (e.g. "how does the company support X?").
+4. Do NOT ask yes/no questions.
+5. Do NOT ask about anything not explicitly stated above.
+
+Respond ONLY with a valid JSON array of exactly {count} items:
+[
+  {{"question": "...", "category": "factual"}},
+  {{"question": "...", "category": "procedural"}}
+]"""
+    response = llm_client.chat([{"role": "user", "content": prompt}], temperature=0.2)
+    match = re.search(r"\[.*\]", response, re.DOTALL)
+    if match:
+        try:
+            qs = json.loads(match.group())
+            for q in qs:
+                q["source_doc"] = title
+            return qs
+        except json.JSONDecodeError:
+            pass
+    return []
+
+
+def _generate_questions_per_document(documents: list[dict]) -> list[dict]:
+    """Generate questions document-by-document so every question is answerable."""
+    total_target = 15
+    per_doc = max(2, total_target // len(documents))
+    all_questions = []
+
+    for doc in documents:
+        print(f"[TestAgent] Generating {per_doc} questions from: {doc['title']}")
+        qs = _questions_from_one_doc(doc["title"], doc["content"], count=per_doc)
+        print(f"[TestAgent]   -> Got {len(qs)} questions")
+        all_questions.extend(qs)
+
+    # Top up to 15 if we got fewer
+    if len(all_questions) < total_target and documents:
+        extra = total_target - len(all_questions)
+        doc = documents[0]
+        qs = _questions_from_one_doc(doc["title"], doc["content"], count=extra)
+        all_questions.extend(qs)
+
+    print(f"[TestAgent] Total questions generated: {len(all_questions)}")
+    return all_questions[:total_target]
+
+
 def analyze_app_and_generate_questions() -> list[dict]:
     import requests
     import re
@@ -129,20 +188,14 @@ def analyze_app_and_generate_questions() -> list[dict]:
         source_label  = "Blueverse agent (self-reported knowledge)"
 
     elif RAG_APP_URL.lower() == "custom":
-        # Read documents directly instead of probing the agent.
-        # Probing asks the agent "what do you know?" — but the agent can hallucinate
-        # topics not in the documents, causing unanswerable questions to be generated.
-        # Reading document text directly guarantees every question has an answer.
-        print("[TestAgent] Target is Custom Agent — reading documents directly...")
+        print("[TestAgent] Target is Custom Agent — generating questions per document...")
         from rag_app.document_store import get_all_documents
         documents = get_all_documents()
         if not documents:
             print("[TestAgent] No documents found in document store.")
             return [{"question": "What topics does this system cover?",
                      "category": "general"}]
-        for doc in documents:
-            content_block += f"\n\n--- {doc['title']} ---\n{doc['content']}"
-        source_label = f"Document store ({len(documents)} documents)"
+        return _generate_questions_per_document(documents)
 
     else:
         # ── Custom RAG App: fetch actual document content ─────────────────────
