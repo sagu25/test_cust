@@ -173,28 +173,29 @@ def analyze_app_and_generate_questions() -> list[dict]:
 
     print(f"[TestAgent] Generating questions from: {source_label}")
 
-    prompt = f"""You are a QA engineer building a test suite for an AI assistant.
+    prompt = f"""You are a QA engineer building a test suite for an AI assistant that answers ONLY from policy documents.
 
-Below is what the AI assistant knows (either from documents or its own description).
-You MUST generate questions that can ONLY be answered from this content.
-Do NOT generate questions about topics NOT mentioned below.
-Do NOT generate generic, off-topic, or trivial yes/no questions.
-
-WHAT THE ASSISTANT KNOWS:
+DOCUMENTS:
 {content_block}
 
-Generate exactly 15 specific test questions strictly based on the content above.
-Cover these types:
-- factual     : specific numbers, limits, percentages, dates mentioned above
-- procedural  : steps or processes described above
-- eligibility : who qualifies or who is excluded
-- conditional : edge cases (what happens if X)
-- adversarial : slightly wrong premise to test if the agent corrects it
+Your job: generate 15 questions where EACH answer can be found as an EXPLICIT sentence or number in the documents above.
 
-Rules:
-- Every question MUST be answerable from the content above
-- Include exact figures and rules from the content in your questions
-- Do NOT ask about anything not mentioned in the content above
+STRICT RULES:
+1. The answer must exist as a direct quote or explicit statement in the text — NOT inferred, NOT implied, NOT summarized.
+2. Before writing each question, verify you can find an exact sentence in the text that answers it.
+3. Prefer questions about specific numbers, limits, dates, names, percentages, and defined processes.
+4. Do NOT ask about things the document only vaguely mentions, or things that require combining multiple ideas.
+5. Do NOT ask about topics not mentioned at all.
+6. Do NOT generate yes/no questions.
+
+Good example: "What is the maximum reimbursement amount for training expenses per year?"
+Bad example: "How does the company support employee wellbeing?" (too vague, answer requires inference)
+
+Question types to include:
+- factual     : exact numbers, limits, percentages, dates, names
+- procedural  : explicit step-by-step process described in the text
+- eligibility : exact criteria stated for who qualifies or is excluded
+- adversarial : a question with a slightly wrong number/fact to test if agent corrects it
 
 Respond ONLY with a valid JSON array:
 [
