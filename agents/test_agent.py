@@ -129,10 +129,20 @@ def analyze_app_and_generate_questions() -> list[dict]:
         source_label  = "Blueverse agent (self-reported knowledge)"
 
     elif RAG_APP_URL.lower() == "custom":
-        print("[TestAgent] Target is Custom Agent — probing agent knowledge...")
-        import custom_agent_connector
-        content_block = custom_agent_connector.probe_agent_knowledge()
-        source_label  = "Custom agent (self-reported knowledge)"
+        # Read documents directly instead of probing the agent.
+        # Probing asks the agent "what do you know?" — but the agent can hallucinate
+        # topics not in the documents, causing unanswerable questions to be generated.
+        # Reading document text directly guarantees every question has an answer.
+        print("[TestAgent] Target is Custom Agent — reading documents directly...")
+        from rag_app.document_store import get_all_documents
+        documents = get_all_documents()
+        if not documents:
+            print("[TestAgent] No documents found in document store.")
+            return [{"question": "What topics does this system cover?",
+                     "category": "general"}]
+        for doc in documents:
+            content_block += f"\n\n--- {doc['title']} ---\n{doc['content']}"
+        source_label = f"Document store ({len(documents)} documents)"
 
     else:
         # ── Custom RAG App: fetch actual document content ─────────────────────
