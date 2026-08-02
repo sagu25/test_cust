@@ -97,6 +97,36 @@ def score_badge(score):
     return f"🔴 {score:.2f}"
 
 
+# ── document management helpers ───────────────────────────────────────────────
+
+def _extract_text(uploaded_file) -> str:
+    if uploaded_file.name.lower().endswith(".pdf"):
+        try:
+            from pypdf import PdfReader
+            import io
+            reader = PdfReader(io.BytesIO(uploaded_file.read()))
+            pages  = [page.extract_text() or "" for page in reader.pages]
+            return "\n\n".join(p for p in pages if p.strip())
+        except Exception as e:
+            st.error(f"PDF extraction error: {e}")
+            return ""
+    return uploaded_file.read().decode("utf-8", errors="ignore")
+
+
+def _reset_questions():
+    if not os.path.exists(DB_PATH):
+        return
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM generated_questions")
+    conn.execute("DELETE FROM golden_answers")
+    try:
+        conn.execute("DELETE FROM eval_cache")
+    except Exception:
+        pass
+    conn.commit()
+    conn.close()
+
+
 # ── sidebar ───────────────────────────────────────────────────────────────────
 
 with st.sidebar:
@@ -115,6 +145,83 @@ with st.sidebar:
         st.markdown(f"**Generated Questions ({len(qs)})**")
         for i, q in enumerate(qs):
             st.caption(f"{i+1}. {q['question'][:55]}...")
+
+    st.divider()
+
+    # ── Document Management ───────────────────────────────────────────────────
+    st.markdown("### Document Management")
+
+    try:
+        from rag_app.document_store import (
+            get_all_documents, get_uploaded_documents,
+            add_document, remove_document,
+        )
+        from rag_app import retriever as _retriever
+
+        all_docs      = get_all_documents()
+        uploaded_docs = get_uploaded_documents()
+        uploaded_titles = {d["title"] for d in uploaded_docs}
+
+        st.caption(f"{len(all_docs)} document(s) in knowledge base")
+        for doc in all_docs:
+            icon = "📄" if doc["title"] in uploaded_titles else "🔒"
+            st.caption(f"{icon} {doc['title']} ({len(doc['content']):,} chars)")
+
+        st.divider()
+
+        # ── Upload ────────────────────────────────────────────────────────────
+        st.markdown("**Upload New Document**")
+        upload_file = st.file_uploader(
+            "TXT or PDF", type=["txt", "pdf"], key="doc_upload",
+            label_visibility="collapsed",
+        )
+        doc_title = st.text_input(
+            "Document title", placeholder="e.g. Payroll Policy", key="doc_title"
+        )
+
+        add_disabled = not (upload_file and doc_title and doc_title.strip())
+        if st.button("Add to Knowledge Base", type="primary",
+                     disabled=add_disabled, use_container_width=True):
+            text = _extract_text(upload_file)
+            if text.strip():
+                add_document(doc_title.strip(), text, upload_file.name)
+                _reset_questions()
+                _retriever.reload()
+                st.success(
+                    f"Added **{doc_title}**. Questions will regenerate on "
+                    f"the next orchestrator cycle."
+                )
+                st.rerun()
+            else:
+                st.error("Could not extract text — check the file format.")
+
+        # ── Remove ────────────────────────────────────────────────────────────
+        if uploaded_docs:
+            st.divider()
+            st.markdown("**Remove Uploaded Document**")
+            remove_title = st.selectbox(
+                "Select document", [d["title"] for d in uploaded_docs],
+                key="remove_select", label_visibility="collapsed",
+            )
+            if st.button("Remove Document", type="secondary",
+                         use_container_width=True):
+                remove_document(remove_title)
+                _reset_questions()
+                _retriever.reload()
+                st.warning(
+                    f"Removed **{remove_title}**. Questions will regenerate "
+                    f"on the next orchestrator cycle."
+                )
+                st.rerun()
+
+        # ── Manual reset ──────────────────────────────────────────────────────
+        st.divider()
+        if st.button("Reset All Questions", use_container_width=True):
+            _reset_questions()
+            st.success("Questions cleared — will regenerate on next cycle.")
+
+    except Exception as _doc_err:
+        st.caption(f"Document management unavailable: {_doc_err}")
 
 if auto_refresh:
     st.markdown(

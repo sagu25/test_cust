@@ -161,8 +161,19 @@ def _query_local(question: str) -> dict | None:
             "Do not attempt to answer from your own knowledge."
         )
 
+    # Build dynamic system prompt that reflects current document titles
+    try:
+        from rag_app.document_store import get_all_documents
+        titles       = [d["title"] for d in get_all_documents()]
+        dynamic_prompt = (
+            SYSTEM_PROMPT +
+            f" Your knowledge base covers these documents: {', '.join(titles)}."
+        )
+    except Exception:
+        dynamic_prompt = SYSTEM_PROMPT
+
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": dynamic_prompt},
         {"role": "user",   "content": user_content},
     ]
 

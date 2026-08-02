@@ -51,11 +51,18 @@ def _use_embedding() -> bool:
 _chunks: list[dict] = []
 
 # TF-IDF state
-_vectorizer  = None
+_vectorizer   = None
 _tfidf_matrix = None
 
 # Embedding state
 _chunk_embeddings: np.ndarray | None = None   # shape (n_chunks, dim)
+
+# Track uploads/meta.json modification time to auto-reload when docs change
+_last_meta_mtime: float = 0.0
+_UPLOADS_META = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "uploads", "meta.json",
+)
 
 # ── TF-IDF synonyms (only used in TF-IDF fallback mode) ──────────────────────
 _SYNONYMS = {
@@ -187,8 +194,13 @@ def reload():
 
 
 def _ensure_index():
-    if not _chunks:
+    global _last_meta_mtime
+    current_mtime = (
+        os.path.getmtime(_UPLOADS_META) if os.path.exists(_UPLOADS_META) else 0.0
+    )
+    if not _chunks or current_mtime != _last_meta_mtime:
         reload()
+        _last_meta_mtime = current_mtime
 
 
 # ── Retrieval ─────────────────────────────────────────────────────────────────
