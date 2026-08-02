@@ -103,27 +103,12 @@ def _query_local(question: str) -> dict | None:
     # Pull context from the local document store
     try:
         from rag_app import retriever
-
-        # Confidence gate threshold differs by retrieval mode:
-        # Embedding cosine similarity: even unrelated chunks score 0.20-0.40
-        # TF-IDF: unrelated chunks score near 0.00-0.08
-        use_embedding = retriever._use_embedding()
-        gate_threshold = 0.42 if use_embedding else 0.08
-
         context_chunks = retriever.retrieve(question, top_k=4)
         if not context_chunks:
             print("[CustomAgent] WARNING: Retriever returned 0 chunks.")
-        elif context_chunks[0]["score"] < gate_threshold:
-            print(f"[CustomAgent] Confidence gate triggered "
-                  f"(best score {context_chunks[0]['score']:.3f} < {gate_threshold} "
-                  f"[{'embedding' if use_embedding else 'tfidf'} mode]) — "
-                  f"topic not covered in documents.")
-            return {
-                "question":          question,
-                "answer":            "This topic is not covered in the policy documents.",
-                "retrieved_context": [],
-                "sources":           [],
-            }
+        else:
+            top_score = context_chunks[0]["score"]
+            print(f"[CustomAgent] Top retrieval score: {top_score:.3f}")
     except Exception as e:
         print(f"[CustomAgent] ERROR loading documents from rag_app: {e}")
         context_chunks = []
