@@ -1,0 +1,928 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG Evaluation System — Live Demo</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Segoe UI', Arial, sans-serif;
+  background: #0d1117;
+  color: #e6edf3;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Header ── */
+.header {
+  text-align: center;
+  padding: 40px 20px 20px;
+  background: linear-gradient(180deg, #161b22 0%, #0d1117 100%);
+  border-bottom: 1px solid #21262d;
+}
+.header h1 { font-size: 2.2rem; color: #f0f6fc; margin-bottom: 8px; }
+.header p  { color: #8b949e; font-size: 1rem; }
+
+/* ── Stage ── */
+.stage {
+  max-width: 1100px;
+  margin: 40px auto;
+  padding: 0 20px;
+}
+
+/* ── Step indicator ── */
+.step-bar {
+  display: flex;
+  justify-content: center;
+  gap: 6px;
+  margin-bottom: 36px;
+  flex-wrap: wrap;
+}
+.step-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: #21262d;
+  transition: background 0.4s, transform 0.3s;
+  cursor: pointer;
+}
+.step-dot.active  { background: #388bfd; transform: scale(1.4); }
+.step-dot.done    { background: #3fb950; }
+
+/* ── Scene card ── */
+.scene {
+  display: none;
+  animation: fadeIn 0.5s ease;
+}
+.scene.active { display: block; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Scene title ── */
+.scene-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+.scene-step-label {
+  display: inline-block;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  padding: 4px 14px;
+  border-radius: 20px;
+  margin-bottom: 12px;
+}
+.scene-title { font-size: 1.7rem; font-weight: 800; margin-bottom: 8px; }
+.scene-desc  { color: #8b949e; font-size: 1rem; max-width: 600px; margin: 0 auto; line-height: 1.6; }
+
+/* ── Flow diagram ── */
+.flow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 36px;
+}
+.flow-node {
+  border-radius: 12px;
+  border: 2px solid;
+  background: #161b22;
+  padding: 14px 20px;
+  text-align: center;
+  min-width: 110px;
+  position: relative;
+  transition: all 0.3s;
+}
+.flow-node.pulse {
+  animation: pulse 1s ease-in-out infinite alternate;
+}
+@keyframes pulse {
+  from { box-shadow: 0 0 0 0 currentColor; }
+  to   { box-shadow: 0 0 20px 4px currentColor; }
+}
+.flow-node .icon { font-size: 1.8rem; margin-bottom: 6px; }
+.flow-node .name { font-size: 0.78rem; font-weight: 700; }
+.flow-node .sub  { font-size: 0.68rem; color: #8b949e; margin-top: 3px; }
+.flow-arrow { font-size: 1.6rem; color: #30363d; flex-shrink: 0; }
+.flow-arrow.active-arrow { color: #388bfd; animation: arrowPulse 0.8s ease-in-out infinite; }
+@keyframes arrowPulse {
+  0%,100% { opacity: 0.4; transform: scaleX(1);   }
+  50%      { opacity: 1;   transform: scaleX(1.3); }
+}
+
+/* ── Message bubble (animated typing) ── */
+.bubble-row {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 20px;
+}
+.bubble-avatar {
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  border: 2px solid;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.3rem;
+  flex-shrink: 0;
+  background: #161b22;
+}
+.bubble-content { flex: 1; }
+.bubble-name {
+  font-size: 0.75rem;
+  font-weight: 700;
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+.bubble {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 0 12px 12px 12px;
+  padding: 14px 18px;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  position: relative;
+}
+.bubble.typing::after {
+  content: '▌';
+  animation: blink 0.7s step-end infinite;
+  color: #388bfd;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* ── Document card ── */
+.doc-card {
+  background: #161b22;
+  border: 2px solid #e3b341;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
+}
+.doc-card h3 { color: #e3b341; font-size: 0.9rem; margin-bottom: 10px; }
+.doc-card p  { font-size: 0.85rem; color: #c9d1d9; line-height: 1.6; }
+.doc-highlight {
+  background: #2d2a00;
+  border-left: 3px solid #e3b341;
+  padding: 8px 12px;
+  border-radius: 4px;
+  margin-top: 10px;
+  font-size: 0.82rem;
+  color: #e3b341;
+}
+
+/* ── Score cards ── */
+.scores-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+.score-card {
+  background: #161b22;
+  border: 2px solid #21262d;
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  transition: border-color 0.5s;
+}
+.score-card.revealed { border-color: inherit; }
+.score-num {
+  font-size: 2.5rem;
+  font-weight: 900;
+  margin: 8px 0;
+  opacity: 0;
+  transform: scale(0.5);
+  transition: opacity 0.5s, transform 0.5s;
+}
+.score-card.revealed .score-num { opacity: 1; transform: scale(1); }
+.score-label { font-size: 0.78rem; color: #8b949e; font-weight: 700; letter-spacing: 1px; }
+.score-icon  { font-size: 1.6rem; margin-bottom: 6px; }
+
+/* ── Chunk cards ── */
+.chunks { display: flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+.chunk {
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  padding: 12px 16px;
+  font-size: 0.82rem;
+  color: #c9d1d9;
+  line-height: 1.55;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  opacity: 0;
+  transform: translateX(-20px);
+  transition: opacity 0.4s, transform 0.4s;
+}
+.chunk.visible { opacity: 1; transform: translateX(0); }
+.chunk-score {
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  align-self: center;
+}
+.chunk-source {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+/* ── Two-column layout ── */
+.two-col { display: flex; gap: 20px; margin-top: 16px; flex-wrap: wrap; }
+.col-half { flex: 1; min-width: 260px; }
+
+/* ── Control buttons ── */
+.controls {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-top: 40px;
+  padding-bottom: 60px;
+}
+.btn {
+  padding: 12px 32px;
+  border-radius: 8px;
+  border: none;
+  font-size: 1rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-primary { background: #238636; color: #fff; }
+.btn-primary:hover { background: #2ea043; transform: translateY(-2px); }
+.btn-secondary { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; }
+.btn-secondary:hover { background: #30363d; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+.btn-restart { background: #388bfd22; color: #388bfd; border: 1px solid #388bfd; }
+.btn-restart:hover { background: #388bfd44; }
+
+/* ── Progress bar ── */
+.progress-bar-wrap {
+  width: 100%;
+  height: 4px;
+  background: #21262d;
+  border-radius: 2px;
+  margin-bottom: 28px;
+}
+.progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #388bfd, #3fb950);
+  border-radius: 2px;
+  transition: width 0.5s ease;
+}
+
+/* ── Colors ── */
+.c-blue   { color: #388bfd; border-color: #388bfd; }
+.c-orange { color: #f0883e; border-color: #f0883e; }
+.c-green  { color: #3fb950; border-color: #3fb950; }
+.c-purple { color: #bc8cff; border-color: #bc8cff; }
+.c-yellow { color: #e3b341; border-color: #e3b341; }
+.c-red    { color: #ff7b72; border-color: #ff7b72; }
+.c-teal   { color: #39d353; border-color: #39d353; }
+
+.bg-blue   { background: #1f3a5c22; }
+.bg-orange { background: #4a2c1a22; }
+.bg-green  { background: #1a3a2322; }
+.bg-purple { background: #2d1f4a22; }
+
+.tag {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 20px;
+  margin-right: 6px;
+  margin-bottom: 4px;
+}
+
+/* ── Timer badge ── */
+.timer-badge {
+  display: inline-block;
+  background: #39d35322;
+  border: 1px solid #39d353;
+  color: #39d353;
+  font-size: 0.8rem;
+  font-weight: 700;
+  padding: 4px 14px;
+  border-radius: 20px;
+  margin-bottom: 16px;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🧠 RAG Evaluation System</h1>
+  <p>Watch how the system tests an AI agent — step by step with a real example</p>
+</div>
+
+<div class="stage">
+
+  <!-- Progress bar -->
+  <div class="progress-bar-wrap">
+    <div class="progress-bar-fill" id="progressBar" style="width:0%"></div>
+  </div>
+
+  <!-- Step dots -->
+  <div class="step-bar" id="stepBar"></div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCENE 0 — Introduction
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="scene active" id="scene-0">
+    <div class="scene-header">
+      <div class="scene-step-label c-blue bg-blue">Welcome</div>
+      <div class="scene-title">What does this system do?</div>
+      <div class="scene-desc">Imagine you built an AI assistant that answers questions from your company documents. How do you know it's giving correct answers? This system automatically tests it — every 2 minutes.</div>
+    </div>
+
+    <div class="flow">
+      <div class="flow-node c-yellow pulse">
+        <div class="icon">📄</div>
+        <div class="name">Your Documents</div>
+        <div class="sub">PDF / TXT files</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node c-orange">
+        <div class="icon">🔍</div>
+        <div class="name">Test Agent</div>
+        <div class="sub">Writes questions</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node c-green">
+        <div class="icon">💬</div>
+        <div class="name">Custom Agent</div>
+        <div class="sub">Answers them</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node c-purple">
+        <div class="icon">⚖️</div>
+        <div class="name">Evaluator</div>
+        <div class="sub">Scores answers</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node c-blue">
+        <div class="icon">📊</div>
+        <div class="name">Dashboard</div>
+        <div class="sub">Shows results</div>
+      </div>
+    </div>
+
+    <div class="two-col" style="max-width:700px; margin:0 auto">
+      <div class="flow-node c-yellow" style="text-align:left; padding:20px">
+        <div style="font-size:0.75rem;font-weight:700;letter-spacing:1px;margin-bottom:10px;color:#e3b341">EXAMPLE DOCUMENT UPLOADED</div>
+        <div style="font-size:0.88rem;color:#c9d1d9;line-height:1.6">
+          <strong style="color:#e3b341">Training & Development Policy</strong><br><br>
+          "Employees are eligible for a learning budget of <strong>₹1,500</strong> per year. Requests must be submitted to the HR portal <strong>at least 2 weeks</strong> before the training date. Employees must complete the training and submit a completion certificate within <strong>30 days</strong>."
+        </div>
+      </div>
+      <div class="flow-node c-blue" style="text-align:left; padding:20px">
+        <div style="font-size:0.75rem;font-weight:700;letter-spacing:1px;margin-bottom:10px;color:#388bfd">THE SYSTEM WILL AUTOMATICALLY</div>
+        <div style="font-size:0.85rem;color:#c9d1d9;line-height:1.8">
+          ✅ Generate test questions from this document<br>
+          ✅ Ask those questions to your AI agent<br>
+          ✅ Check if the answers match the document<br>
+          ✅ Score faithfulness, accuracy & consistency<br>
+          ✅ Repeat every 2 minutes automatically
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCENE 1 — Orchestrator starts
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="scene" id="scene-1">
+    <div class="scene-header">
+      <div class="timer-badge">⏰ Every 2 minutes automatically</div>
+      <div class="scene-step-label c-teal bg-green">Step 1</div>
+      <div class="scene-title">Orchestrator Wakes Up</div>
+      <div class="scene-desc">The Orchestrator is the controller. It wakes up every 2 minutes and tells each agent what to do — like a manager assigning tasks.</div>
+    </div>
+
+    <div class="flow">
+      <div class="flow-node c-teal pulse">
+        <div class="icon">⏰</div>
+        <div class="name">Orchestrator</div>
+        <div class="sub">orchestrator.py</div>
+      </div>
+      <div class="flow-arrow active-arrow">→</div>
+      <div class="flow-node c-orange">
+        <div class="icon">🔍</div>
+        <div class="name">Test Agent</div>
+        <div class="sub">"Generate questions!"</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node c-green" style="opacity:0.3">
+        <div class="icon">💬</div>
+        <div class="name">Custom Agent</div>
+        <div class="sub">waiting...</div>
+      </div>
+      <div class="flow-arrow">→</div>
+      <div class="flow-node c-purple" style="opacity:0.3">
+        <div class="icon">⚖️</div>
+        <div class="name">Evaluator</div>
+        <div class="sub">waiting...</div>
+      </div>
+    </div>
+
+    <div class="bubble-row" style="max-width:650px;margin:0 auto">
+      <div class="bubble-avatar c-teal">⏰</div>
+      <div class="bubble-content">
+        <div class="bubble-name c-teal">ORCHESTRATOR</div>
+        <div class="bubble" id="b1">Hey Test Agent — it's been 2 minutes. Time for a new evaluation cycle. Read the documents and generate test questions. I'll be waiting.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCENE 2 — Test Agent reads docs & generates questions
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="scene" id="scene-2">
+    <div class="scene-header">
+      <div class="scene-step-label c-orange bg-orange">Step 2 — Agent 1</div>
+      <div class="scene-title">Test Agent Generates Questions</div>
+      <div class="scene-desc">The Test Agent reads each document directly and asks an LLM to create test questions. Every question must have an explicit answer in the document text — no guessing.</div>
+    </div>
+
+    <div class="two-col">
+      <div class="col-half">
+        <div class="doc-card">
+          <h3>📄 Training & Development Policy</h3>
+          <p>"Employees are eligible for a learning budget of <strong style="color:#e3b341">₹1,500</strong> per year. Requests must be submitted to the HR portal <strong style="color:#e3b341">at least 2 weeks</strong> before the training date. Employees must complete the training and submit a completion certificate within <strong style="color:#e3b341">30 days</strong>."</p>
+          <div class="doc-highlight">🔑 Test Agent reads this text directly</div>
+        </div>
+      </div>
+      <div class="col-half">
+        <div class="bubble-row">
+          <div class="bubble-avatar c-orange">🔍</div>
+          <div class="bubble-content">
+            <div class="bubble-name c-orange">TEST AGENT → GPT-4.1</div>
+            <div class="bubble">"Generate 3 questions from this document. Each answer must exist as an EXPLICIT sentence in the text. No inference allowed."</div>
+          </div>
+        </div>
+        <div class="bubble-row" style="margin-top:16px">
+          <div class="bubble-avatar c-red">🤖</div>
+          <div class="bubble-content">
+            <div class="bubble-name c-red">LLM RESPONSE</div>
+            <div class="bubble">
+              <span class="tag c-orange bg-orange">factual</span> What is the annual learning budget per employee?<br><br>
+              <span class="tag c-blue bg-blue">procedural</span> How many weeks before training must a request be submitted?<br><br>
+              <span class="tag c-purple bg-purple">deadline</span> Within how many days must an employee submit a completion certificate?
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCENE 3 — Custom Agent receives question
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="scene" id="scene-3">
+    <div class="scene-header">
+      <div class="scene-step-label c-green bg-green">Step 3 — Agent 2</div>
+      <div class="scene-title">Custom Agent Gets a Question</div>
+      <div class="scene-desc">The Test Agent fires a question at the Custom Agent. The Custom Agent searches all active documents using AI-powered embedding search to find the most relevant paragraphs.</div>
+    </div>
+
+    <div class="bubble-row" style="max-width:680px;margin:0 auto 24px">
+      <div class="bubble-avatar c-orange">🔍</div>
+      <div class="bubble-content">
+        <div class="bubble-name c-orange">TEST AGENT → CUSTOM AGENT</div>
+        <div class="bubble">"What is the annual learning budget per employee?"</div>
+      </div>
+    </div>
+
+    <div style="text-align:center;color:#8b949e;font-size:0.85rem;margin-bottom:12px">
+      🔎 Retriever searches all documents using <strong style="color:#39d353">Azure Embeddings</strong> (understands meaning, not just keywords)
+    </div>
+
+    <div class="chunks" id="chunksContainer" style="max-width:680px;margin:0 auto">
+      <div class="chunk" id="chunk1">
+        <div>
+          <div class="chunk-source c-green">Training & Development Policy</div>
+          "Employees are eligible for a learning budget of ₹1,500 per year."
+        </div>
+        <span class="chunk-score" style="background:#1a3a23;color:#3fb950">0.89 ✓</span>
+      </div>
+      <div class="chunk" id="chunk2">
+        <div>
+          <div class="chunk-source c-green">Training & Development Policy</div>
+          "Requests must be submitted to the HR portal at least 2 weeks before the training date."
+        </div>
+        <span class="chunk-score" style="background:#1a3a23;color:#3fb950">0.71</span>
+      </div>
+      <div class="chunk" id="chunk3">
+        <div>
+          <div class="chunk-source" style="color:#8b949e">Annual Leave Policy</div>
+          "Employees are entitled to 18 days of paid annual leave per year."
+        </div>
+        <span class="chunk-score" style="background:#21262d;color:#8b949e">0.24</span>
+      </div>
+    </div>
+    <div style="text-align:center;color:#8b949e;font-size:0.78rem;margin-top:10px;max-width:680px;margin-left:auto;margin-right:auto">
+      Top 2 chunks are highly relevant (score 0.89, 0.71). The leave policy chunk (0.24) is much lower — correctly ranked last.
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCENE 4 — Custom Agent builds prompt & answers
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="scene" id="scene-4">
+    <div class="scene-header">
+      <div class="scene-step-label c-green bg-green">Step 4 — Agent 2</div>
+      <div class="scene-title">Custom Agent Answers the Question</div>
+      <div class="scene-desc">The retrieved chunks are sent to GPT-4.1 with a special 2-step prompt that forces the model to QUOTE from the document before answering — preventing it from using its own knowledge.</div>
+    </div>
+
+    <div class="two-col" style="max-width:900px;margin:0 auto">
+      <div class="col-half">
+        <div class="doc-card" style="border-color:#388bfd">
+          <h3 style="color:#388bfd">📝 Prompt sent to GPT-4.1</h3>
+          <p style="color:#8b949e;font-size:0.8rem">DOCUMENT EXCERPTS:</p>
+          <p style="font-size:0.8rem;color:#c9d1d9;margin:8px 0">[Training Policy]: "Employees are eligible for a learning budget of ₹1,500 per year."</p>
+          <hr style="border-color:#21262d;margin:8px 0">
+          <p style="font-size:0.8rem;color:#c9d1d9"><strong style="color:#388bfd">QUESTION:</strong> What is the annual learning budget per employee?</p>
+          <hr style="border-color:#21262d;margin:8px 0">
+          <p style="font-size:0.8rem;color:#f0883e"><strong>STEP 1</strong> — Quote the most relevant passage from the excerpts above.</p>
+          <p style="font-size:0.8rem;color:#3fb950;margin-top:6px"><strong>STEP 2</strong> — Using ONLY what you quoted, write a clear answer. Do not use your own knowledge.</p>
+        </div>
+      </div>
+
+      <div class="col-half">
+        <div class="bubble-row">
+          <div class="bubble-avatar c-red">🤖</div>
+          <div class="bubble-content">
+            <div class="bubble-name c-red">GPT-4.1 RESPONSE</div>
+            <div class="bubble">
+              <span style="color:#f0883e;font-weight:700">STEP 1 — Quote:</span><br>
+              <span style="background:#2d2a00;padding:2px 6px;border-radius:4px;color:#e3b341">"Employees are eligible for a learning budget of ₹1,500 per year."</span>
+              <br><br>
+              <span style="color:#3fb950;font-weight:700">STEP 2 — Answer:</span><br>
+              The annual learning budget per employee is <strong style="color:#3fb950">₹1,500</strong>.
+            </div>
+          </div>
+        </div>
+
+        <div style="background:#161b22;border:1px solid #3fb950;border-radius:10px;padding:14px;margin-top:16px">
+          <div style="font-size:0.75rem;font-weight:700;color:#3fb950;margin-bottom:6px">✅ ANSWER PASSED VERIFICATION</div>
+          <div style="font-size:0.82rem;color:#c9d1d9;line-height:1.5">The answer "₹1,500" comes directly from the quoted text — not from GPT's own training knowledge. No hallucination.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCENE 5 — Evaluator scores
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="scene" id="scene-5">
+    <div class="scene-header">
+      <div class="scene-step-label c-purple bg-purple">Step 5 — Agent 3</div>
+      <div class="scene-title">Evaluator Scores the Answer</div>
+      <div class="scene-desc">The Evaluator runs 4 different checks on every answer — combining code-based math, AI judgment, and historical comparison to give a complete picture of quality.</div>
+    </div>
+
+    <div style="max-width:800px;margin:0 auto">
+      <div style="background:#161b22;border:1px solid #21262d;border-radius:12px;padding:16px;margin-bottom:20px;text-align:center">
+        <div style="font-size:0.75rem;color:#8b949e;margin-bottom:4px">QUESTION</div>
+        <div style="font-size:0.95rem;font-weight:700">"What is the annual learning budget per employee?"</div>
+        <div style="font-size:0.75rem;color:#8b949e;margin-top:8px">AGENT ANSWER</div>
+        <div style="font-size:0.95rem;color:#3fb950;font-weight:700">"The annual learning budget per employee is ₹1,500."</div>
+      </div>
+
+      <div class="scores-grid" id="scoresGrid">
+        <div class="score-card c-yellow" id="sc1">
+          <div class="score-icon">🔢</div>
+          <div class="score-label">FACTUAL ANCHOR</div>
+          <div class="score-num" style="color:#e3b341" id="sn1">1.00</div>
+          <div style="font-size:0.72rem;color:#8b949e;margin-top:4px">₹1,500 found in document ✓</div>
+        </div>
+        <div class="score-card c-blue" id="sc2">
+          <div class="score-icon">🏆</div>
+          <div class="score-label">GOLDEN ROUGE-L</div>
+          <div class="score-num" style="color:#388bfd" id="sn2">1.00</div>
+          <div style="font-size:0.72rem;color:#8b949e;margin-top:4px">First run → stored as Golden Answer</div>
+        </div>
+        <div class="score-card c-red" id="sc3">
+          <div class="score-icon">⚖️</div>
+          <div class="score-label">LLM JUDGE</div>
+          <div class="score-num" style="color:#ff7b72" id="sn3">0.95</div>
+          <div style="font-size:0.72rem;color:#8b949e;margin-top:4px">Faithful · Relevant · Complete</div>
+        </div>
+        <div class="score-card c-green" id="sc4">
+          <div class="score-icon">🔄</div>
+          <div class="score-label">CONSISTENCY</div>
+          <div class="score-num" style="color:#3fb950" id="sn4">—</div>
+          <div style="font-size:0.72rem;color:#8b949e;margin-top:4px">Tracked after 2+ runs</div>
+        </div>
+      </div>
+
+      <div style="background:#1a3a23;border:1px solid #3fb950;border-radius:10px;padding:16px;margin-top:20px;text-align:center" id="overallScore" style="opacity:0">
+        <div style="font-size:0.78rem;color:#8b949e;margin-bottom:6px;font-weight:700;letter-spacing:1px">OVERALL SCORE</div>
+        <div style="font-size:3rem;font-weight:900;color:#3fb950">0.98</div>
+        <div style="font-size:0.82rem;color:#8b949e;margin-top:4px">Excellent — answer is accurate, grounded, and complete</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCENE 6 — What if agent is WRONG
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="scene" id="scene-6">
+    <div class="scene-header">
+      <div class="scene-step-label c-red" style="background:#3a1f1f22">⚠️ What if the agent answers WRONG?</div>
+      <div class="scene-title">Catching a Hallucination</div>
+      <div class="scene-desc">GPT-4.1 knows from its training that typical learning budgets are around ₹1,000. Without the quote enforcement, it might answer from memory instead of the document.</div>
+    </div>
+
+    <div class="two-col" style="max-width:900px;margin:0 auto">
+      <div class="col-half">
+        <div style="font-size:0.8rem;font-weight:700;color:#ff7b72;margin-bottom:10px">❌ WITHOUT our system (hallucination)</div>
+        <div class="bubble-row">
+          <div class="bubble-avatar c-red">🤖</div>
+          <div class="bubble-content">
+            <div class="bubble-name c-red">GPT-4.1 (no quote enforcement)</div>
+            <div class="bubble" style="border-color:#ff7b72">
+              "The typical annual learning budget for employees is around <strong style="color:#ff7b72">₹1,000</strong>."
+              <br><br>
+              <span style="font-size:0.75rem;color:#ff7b72">⚠ GPT answered from its own training knowledge, not from your document</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="background:#3a1f1f;border:1px solid #ff7b72;border-radius:10px;padding:14px;margin-top:14px">
+          <div style="font-size:0.75rem;font-weight:700;color:#ff7b72;margin-bottom:8px">EVALUATOR CATCHES IT</div>
+          <div style="font-size:0.82rem;color:#c9d1d9;line-height:1.6">
+            🔢 Factual Anchor: ₹1,000 NOT in document → <strong style="color:#ff7b72">0.00</strong><br>
+            🏆 Golden ROUGE-L: differs from golden "₹1,500" → <strong style="color:#ff7b72">0.12</strong><br>
+            ⚖️ LLM Judge: unfaithful to context → <strong style="color:#ff7b72">0.20</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-half">
+        <div style="font-size:0.8rem;font-weight:700;color:#3fb950;margin-bottom:10px">✅ WITH our system (grounded answer)</div>
+        <div class="bubble-row">
+          <div class="bubble-avatar c-green">💬</div>
+          <div class="bubble-content">
+            <div class="bubble-name c-green">CUSTOM AGENT (with quote enforcement)</div>
+            <div class="bubble" style="border-color:#3fb950">
+              <strong style="color:#f0883e">Step 1:</strong> "Employees are eligible for a learning budget of <strong style="color:#e3b341">₹1,500</strong> per year."<br><br>
+              <strong style="color:#3fb950">Step 2:</strong> The annual learning budget is <strong style="color:#3fb950">₹1,500</strong>.
+            </div>
+          </div>
+        </div>
+
+        <div style="background:#1a3a23;border:1px solid #3fb950;border-radius:10px;padding:14px;margin-top:14px">
+          <div style="font-size:0.75rem;font-weight:700;color:#3fb950;margin-bottom:8px">EVALUATOR CONFIRMS IT</div>
+          <div style="font-size:0.82rem;color:#c9d1d9;line-height:1.6">
+            🔢 Factual Anchor: ₹1,500 in document → <strong style="color:#3fb950">1.00</strong><br>
+            🏆 Golden ROUGE-L: matches golden → <strong style="color:#3fb950">1.00</strong><br>
+            ⚖️ LLM Judge: fully faithful → <strong style="color:#3fb950">0.95</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCENE 7 — Dashboard
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="scene" id="scene-7">
+    <div class="scene-header">
+      <div class="scene-step-label c-blue bg-blue">Step 6 — Dashboard</div>
+      <div class="scene-title">Results Appear on the Dashboard</div>
+      <div class="scene-desc">Everything is saved to the database and the Streamlit dashboard updates automatically every 30 seconds — showing trends, scores, and flagging any inconsistencies.</div>
+    </div>
+
+    <div style="max-width:850px;margin:0 auto">
+
+      <!-- Fake dashboard UI -->
+      <div style="background:#161b22;border:2px solid #388bfd;border-radius:16px;overflow:hidden">
+        <!-- Fake browser bar -->
+        <div style="background:#0d1117;padding:10px 16px;display:flex;align-items:center;gap:10px;border-bottom:1px solid #21262d">
+          <div style="display:flex;gap:6px">
+            <div style="width:12px;height:12px;border-radius:50%;background:#ff7b72"></div>
+            <div style="width:12px;height:12px;border-radius:50%;background:#e3b341"></div>
+            <div style="width:12px;height:12px;border-radius:50%;background:#3fb950"></div>
+          </div>
+          <div style="background:#21262d;border-radius:6px;padding:4px 16px;font-size:0.78rem;color:#8b949e">localhost:8501</div>
+          <div style="margin-left:auto;font-size:0.75rem;color:#39d353">● Live</div>
+        </div>
+
+        <!-- Dashboard content -->
+        <div style="padding:20px">
+          <div style="font-size:1.1rem;font-weight:700;margin-bottom:16px;color:#f0f6fc">🧠 RAG Evaluation Dashboard</div>
+
+          <!-- Metric row -->
+          <div style="display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap">
+            <div style="flex:1;min-width:120px;background:#0d1117;border-radius:10px;padding:14px;text-align:center;border:1px solid #21262d">
+              <div style="font-size:1.6rem;font-weight:900;color:#3fb950">0.87</div>
+              <div style="font-size:0.7rem;color:#8b949e;margin-top:4px">AVG SCORE</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#0d1117;border-radius:10px;padding:14px;text-align:center;border:1px solid #21262d">
+              <div style="font-size:1.6rem;font-weight:900;color:#388bfd">15</div>
+              <div style="font-size:0.7rem;color:#8b949e;margin-top:4px">QUESTIONS</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#0d1117;border-radius:10px;padding:14px;text-align:center;border:1px solid #21262d">
+              <div style="font-size:1.6rem;font-weight:900;color:#e3b341">43</div>
+              <div style="font-size:0.7rem;color:#8b949e;margin-top:4px">TOTAL RUNS</div>
+            </div>
+            <div style="flex:1;min-width:120px;background:#0d1117;border-radius:10px;padding:14px;text-align:center;border:1px solid #21262d">
+              <div style="font-size:1.6rem;font-weight:900;color:#ff7b72">2</div>
+              <div style="font-size:0.7rem;color:#8b949e;margin-top:4px">⚠ FLAGGED</div>
+            </div>
+          </div>
+
+          <!-- Sample question rows -->
+          <div style="font-size:0.75rem;font-weight:700;color:#8b949e;margin-bottom:8px;letter-spacing:1px">RECENT EVALUATIONS</div>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="background:#0d1117;border-radius:8px;padding:12px;display:flex;align-items:center;gap:12px;border:1px solid #1a3a23">
+              <span style="font-size:1rem">🟢</span>
+              <div style="flex:1;font-size:0.82rem">What is the annual learning budget per employee?</div>
+              <div style="font-size:0.85rem;font-weight:700;color:#3fb950">0.98</div>
+            </div>
+            <div style="background:#0d1117;border-radius:8px;padding:12px;display:flex;align-items:center;gap:12px;border:1px solid #1a3a23">
+              <span style="font-size:1rem">🟢</span>
+              <div style="flex:1;font-size:0.82rem">How many weeks before training must a request be submitted?</div>
+              <div style="font-size:0.85rem;font-weight:700;color:#3fb950">0.93</div>
+            </div>
+            <div style="background:#0d1117;border-radius:8px;padding:12px;display:flex;align-items:center;gap:12px;border:1px solid #3a1f1f">
+              <span style="font-size:1rem">⚠️</span>
+              <div style="flex:1;font-size:0.82rem">What happens if the certificate is not submitted on time?</div>
+              <div style="font-size:0.85rem;font-weight:700;color:#f0883e">0.51</div>
+            </div>
+          </div>
+
+          <div style="margin-top:14px;background:#1f3a5c22;border:1px solid #388bfd33;border-radius:8px;padding:12px;font-size:0.78rem;color:#8b949e">
+            🔄 Auto-refreshes every 30 seconds &nbsp;|&nbsp; Next orchestrator cycle in <strong style="color:#39d353">1m 24s</strong>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ════════════════════════════════════════════════════════════
+       SCENE 8 — Summary
+  ═══════════════════════════════════════════════════════════════ -->
+  <div class="scene" id="scene-8">
+    <div class="scene-header">
+      <div class="scene-step-label c-green bg-green">Complete!</div>
+      <div class="scene-title">That's the Full Cycle</div>
+      <div class="scene-desc">In 2 minutes, the system tested your AI agent, scored 3 answers across 4 dimensions, caught any hallucinations, and showed results on the dashboard. Then it repeats — forever.</div>
+    </div>
+
+    <div style="max-width:800px;margin:0 auto">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-bottom:28px">
+        <div style="background:#161b22;border:2px solid #39d353;border-radius:12px;padding:18px">
+          <div style="font-size:1.4rem;margin-bottom:8px">⏰</div>
+          <div style="font-weight:700;color:#39d353;margin-bottom:6px">Orchestrator</div>
+          <div style="font-size:0.82rem;color:#8b949e;line-height:1.5">Wakes up every 2 minutes and runs the whole pipeline automatically. No human needed.</div>
+        </div>
+        <div style="background:#161b22;border:2px solid #f0883e;border-radius:12px;padding:18px">
+          <div style="font-size:1.4rem;margin-bottom:8px">🔍</div>
+          <div style="font-weight:700;color:#f0883e;margin-bottom:6px">Test Agent (Agent 1)</div>
+          <div style="font-size:0.82rem;color:#8b949e;line-height:1.5">Reads documents and creates questions that MUST have explicit answers. Like a teacher writing an exam.</div>
+        </div>
+        <div style="background:#161b22;border:2px solid #3fb950;border-radius:12px;padding:18px">
+          <div style="font-size:1.4rem;margin-bottom:8px">💬</div>
+          <div style="font-weight:700;color:#3fb950;margin-bottom:6px">Custom Agent (Agent 2)</div>
+          <div style="font-size:0.82rem;color:#8b949e;line-height:1.5">The AI being tested. Searches documents using embeddings, quotes before answering. Like a student sitting the exam.</div>
+        </div>
+        <div style="background:#161b22;border:2px solid #bc8cff;border-radius:12px;padding:18px">
+          <div style="font-size:1.4rem;margin-bottom:8px">⚖️</div>
+          <div style="font-weight:700;color:#bc8cff;margin-bottom:6px">Evaluator (Agent 3)</div>
+          <div style="font-size:0.82rem;color:#8b949e;line-height:1.5">Scores every answer across 4 layers — facts, golden comparison, LLM judgment, and consistency. Like the examiner.</div>
+        </div>
+      </div>
+
+      <div style="background:linear-gradient(135deg,#1f2d3d,#1a2332);border:1px solid #388bfd44;border-radius:12px;padding:24px;text-align:center">
+        <div style="font-size:1.1rem;font-weight:700;margin-bottom:12px;color:#f0f6fc">The Key Insight</div>
+        <div style="font-size:0.92rem;color:#c9d1d9;line-height:1.7;max-width:580px;margin:0 auto">
+          Test Agent and Custom Agent are <strong style="color:#ff7b72">NOT</strong> the same.<br>
+          One <strong style="color:#f0883e">asks</strong> questions. The other <strong style="color:#3fb950">answers</strong> them.<br><br>
+          Together, they create a <strong style="color:#388bfd">fully automated quality assurance loop</strong> that runs continuously — catching hallucinations, measuring consistency, and tracking improvement over time.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn btn-secondary" id="prevBtn" onclick="changeScene(-1)" disabled>← Previous</button>
+    <button class="btn btn-primary" id="nextBtn" onclick="changeScene(1)">Next →</button>
+    <button class="btn btn-restart" id="restartBtn" onclick="restartDemo()" style="display:none">↺ Restart</button>
+  </div>
+
+</div>
+
+<script>
+const TOTAL_SCENES = 9;
+let current = 0;
+
+const stepLabels = [
+  "Intro", "Orchestrator", "Test Agent", "Retrieval",
+  "Answer", "Scoring", "Hallucination", "Dashboard", "Summary"
+];
+
+// Build step dots
+const stepBar = document.getElementById("stepBar");
+for (let i = 0; i < TOTAL_SCENES; i++) {
+  const dot = document.createElement("div");
+  dot.className = "step-dot" + (i === 0 ? " active" : "");
+  dot.title = stepLabels[i];
+  dot.onclick = () => goToScene(i);
+  stepBar.appendChild(dot);
+}
+
+function updateUI() {
+  // Progress bar
+  document.getElementById("progressBar").style.width =
+    ((current / (TOTAL_SCENES - 1)) * 100) + "%";
+
+  // Dots
+  document.querySelectorAll(".step-dot").forEach((d, i) => {
+    d.className = "step-dot" +
+      (i === current ? " active" : i < current ? " done" : "");
+  });
+
+  // Buttons
+  document.getElementById("prevBtn").disabled = current === 0;
+  document.getElementById("nextBtn").style.display =
+    current === TOTAL_SCENES - 1 ? "none" : "inline-block";
+  document.getElementById("restartBtn").style.display =
+    current === TOTAL_SCENES - 1 ? "inline-block" : "none";
+
+  // Scene visibility
+  document.querySelectorAll(".scene").forEach((s, i) => {
+    s.classList.toggle("active", i === current);
+  });
+
+  // Scene-specific animations
+  if (current === 3) animateChunks();
+  if (current === 5) animateScores();
+}
+
+function goToScene(n) {
+  current = n;
+  updateUI();
+}
+
+function changeScene(dir) {
+  current = Math.max(0, Math.min(TOTAL_SCENES - 1, current + dir));
+  updateUI();
+}
+
+function restartDemo() {
+  current = 0;
+  updateUI();
+}
+
+function animateChunks() {
+  ["chunk1","chunk2","chunk3"].forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.remove("visible");
+      setTimeout(() => el.classList.add("visible"), 300 + i * 300);
+    }
+  });
+}
+
+function animateScores() {
+  ["sc1","sc2","sc3","sc4"].forEach((id, i) => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.classList.remove("revealed");
+      setTimeout(() => el.classList.add("revealed"), 400 + i * 400);
+    }
+  });
+  const overall = document.getElementById("overallScore");
+  if (overall) {
+    overall.style.opacity = "0";
+    setTimeout(() => { overall.style.opacity = "1"; overall.style.transition = "opacity 0.6s"; }, 2200);
+  }
+}
+
+// Keyboard navigation
+document.addEventListener("keydown", e => {
+  if (e.key === "ArrowRight" || e.key === " ") changeScene(1);
+  if (e.key === "ArrowLeft") changeScene(-1);
+});
+
+// Init
+updateUI();
+</script>
+</body>
+</html>
