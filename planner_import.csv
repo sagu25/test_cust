@@ -1,0 +1,69 @@
+Title,Bucket,Priority,Start Date,Due Date,% Complete,Notes
+Set up project folder structure and Git repository,1 - Project Setup & Infrastructure,Medium,,,0,Initial repo setup for RAG Evaluation System
+Configure environment variables (.env) for LLM provider and API keys,1 - Project Setup & Infrastructure,Medium,,,0,Azure OpenAI + Groq credentials
+Build LLM Client supporting Azure OpenAI and Groq,1 - Project Setup & Infrastructure,Medium,,,0,llm_client.py
+Set up SQLite database with all required tables,1 - Project Setup & Infrastructure,Medium,,,0,eval_results.db - 8 tables
+Build Orchestrator with APScheduler (auto-runs every 2 minutes),1 - Project Setup & Infrastructure,Medium,,,0,orchestrator.py
+Set up storage.py for all database read/write operations,1 - Project Setup & Infrastructure,Medium,,,0,storage.py
+Build Blueverse connector to communicate with Blueverse RAG API,2 - Blueverse Integration,Medium,,,0,blueverse_connector.py
+Implement probe agent knowledge (ask Blueverse what it knows),2 - Blueverse Integration,Medium,,,0,Discovery questions to understand agent capabilities
+Integrate Blueverse with orchestrator pipeline,2 - Blueverse Integration,Medium,,,0,RAG_APP_URL=blueverse mode
+Test Blueverse responses through evaluation system,2 - Blueverse Integration,Medium,,,0,End-to-end test with Blueverse
+Add Blueverse mode toggle via RAG_APP_URL environment variable,2 - Blueverse Integration,Low,,,0,.env configuration
+Build Test Agent to generate questions from document content,3 - Test Agent & Evaluation Engine,Important,,,0,agents/test_agent.py
+Implement smart question prioritization (weight by past scores),3 - Test Agent & Evaluation Engine,Important,,,0,Never-asked=4.0 Low-score=3.0 Inconsistent=2.5
+Add parallel question firing using asyncio and aiohttp,3 - Test Agent & Evaluation Engine,Medium,,,0,Fire multiple questions simultaneously
+Build Dead Letter Queue (DLQ) — retry failed questions,3 - Test Agent & Evaluation Engine,Medium,,,0,Retry up to 3 times
+Build Evaluator — Factual Anchor scoring (code-based),3 - Test Agent & Evaluation Engine,Important,,,0,Check numbers and dates from document chunks
+Build Evaluator — Golden ROUGE-L (compare vs first answer),3 - Test Agent & Evaluation Engine,Important,,,0,First answer stored as ground truth
+Build Evaluator — LLM Judge (faithfulness relevancy completeness),3 - Test Agent & Evaluation Engine,Important,,,0,3 dimensions scored by GPT-4.1
+Build Evaluator — Consistency tracking across runs,3 - Test Agent & Evaluation Engine,Important,,,0,Flag if same question gives different answers
+Add eval_cache to avoid re-scoring same answers,3 - Test Agent & Evaluation Engine,Low,,,0,Performance optimization
+Fix question generation — read documents directly instead of probing agent,3 - Test Agent & Evaluation Engine,Important,,,0,Prevents unanswerable questions from being generated
+Improve question generation — per-document (guarantees answerability),3 - Test Agent & Evaluation Engine,Important,,,0,Each doc generates its own questions separately
+Tighten question prompt — require explicit verbatim answers only,3 - Test Agent & Evaluation Engine,Medium,,,0,No inference or implied answers allowed
+Build main dashboard with score charts and trend graphs,4 - Streamlit Dashboard,Important,,,0,dashboard.py - localhost:8501
+Add per-question detail view (expand to see all runs),4 - Streamlit Dashboard,Medium,,,0,Click to expand each question
+Add Golden Answer comparison view,4 - Streamlit Dashboard,Medium,,,0,Show ground truth vs current answer
+Add Consistency report section with flagged questions,4 - Streamlit Dashboard,Medium,,,0,Highlight inconsistent answers
+Add Understanding the Metrics expandable section,4 - Streamlit Dashboard,Low,,,0,Explains all 4 evaluation layers to readers
+Add auto-refresh every 30 seconds,4 - Streamlit Dashboard,Low,,,0,Meta refresh tag
+Add manual Refresh Now button,4 - Streamlit Dashboard,Low,,,0,Sidebar button
+Fix ValueError — pandas Series ambiguity in consistency map,4 - Streamlit Dashboard,Medium,,,0,row.to_dict() fix
+Build Custom Agent Connector (local LLM mode + API mode),5 - Custom Agent & RAG Pipeline,Urgent,,,0,custom_agent_connector.py
+Implement TF-IDF retrieval with synonym expansion,5 - Custom Agent & RAG Pipeline,Important,,,0,training=learning expenses=budget etc
+Add bigram indexing for better phrase matching,5 - Custom Agent & RAG Pipeline,Medium,,,0,ngram_range=(1,2)
+Add keyword overlap hybrid re-ranking on TF-IDF results,5 - Custom Agent & RAG Pipeline,Medium,,,0,65% TF-IDF + 35% keyword overlap
+Implement Azure OpenAI Embedding retrieval (semantic search),5 - Custom Agent & RAG Pipeline,Urgent,,,0,text-embedding-3-small deployment
+Fix embedding mode activation bugs (import-time vs runtime),5 - Custom Agent & RAG Pipeline,Urgent,,,0,_use_embedding() called at runtime not import
+Fix .env path issue for embedding credentials,5 - Custom Agent & RAG Pipeline,Important,,,0,Absolute path to eval_system/.env
+Fix placeholder check bug (empty string in set),5 - Custom Agent & RAG Pipeline,Important,,,0,Removed empty string from _PLACEHOLDER set
+Implement adaptive score threshold (drop chunks below 35% of top score),5 - Custom Agent & RAG Pipeline,Medium,,,0,_apply_threshold() function
+Add confidence gate — block out-of-scope questions before LLM call,5 - Custom Agent & RAG Pipeline,Important,,,0,Threshold 0.42 embedding / 0.08 TF-IDF
+Implement quote-then-answer 2-step prompt,5 - Custom Agent & RAG Pipeline,Urgent,,,0,Step1=quote Step2=answer from quote only
+Add post-processing intercept — override if no quote found in Step 1,5 - Custom Agent & RAG Pipeline,Important,,,0,Catches LLM memory fallback
+Fix chunking — merge short paragraphs under 200 chars,5 - Custom Agent & RAG Pipeline,Important,,,0,Avoids header-only chunks with no content
+Increase top_k from 4 to 6 for better chunk coverage,5 - Custom Agent & RAG Pipeline,Medium,,,0,More chunks = higher chance of finding answer
+Add dynamic system prompt showing active document titles,5 - Custom Agent & RAG Pipeline,Low,,,0,Reflects currently loaded documents
+Set temperature=0.0 for deterministic answers,5 - Custom Agent & RAG Pipeline,Medium,,,0,Reduces answer variation
+Add chunk score logging for every retrieval call,5 - Custom Agent & RAG Pipeline,Low,,,0,Visible in orchestrator terminal output
+Fix auto-reload — retriever watches meta.json and active_docs.json,5 - Custom Agent & RAG Pipeline,Medium,,,0,Reloads index when documents change
+Build dynamic document store (default docs + uploaded docs),6 - Document Management System,Important,,,0,rag_app/document_store.py
+Add PDF text extraction using pypdf,6 - Document Management System,Important,,,0,Handles multi-page PDFs
+Add TXT file upload support,6 - Document Management System,Medium,,,0,UTF-8 decode
+Build document upload UI in dashboard sidebar,6 - Document Management System,Important,,,0,File uploader + title input + Add button
+Auto-reset generated questions when new document is uploaded,6 - Document Management System,Important,,,0,Clears DB so fresh questions are made
+Auto-reload retriever index when documents change,6 - Document Management System,Important,,,0,Detects meta.json modification time change
+Add document removal (delete uploaded docs),6 - Document Management System,Medium,,,0,Remove from uploads/ and meta.json
+Build document selection checkboxes — enable/disable per document,6 - Document Management System,Important,,,0,Dashboard sidebar checkboxes
+Save active document selection to active_docs.json,6 - Document Management System,Medium,,,0,Persisted across sessions
+Auto-activate new uploaded documents in selection,6 - Document Management System,Medium,,,0,add_document() auto-enables new doc
+Auto-deactivate removed documents from selection,6 - Document Management System,Medium,,,0,remove_document() cleans active list
+Create RAG Implementation Guide,7 - Documentation & Architecture,Medium,,,0,RAG_IMPLEMENTATION_GUIDE.md
+Create Leadership Scenario Document (3 business scenarios),7 - Documentation & Architecture,Medium,,,0,LEADERSHIP_SCENARIO_DOCUMENT.md
+Create Orchestrator Run Frequency document,7 - Documentation & Architecture,Low,,,0,How many runs per day/week
+Create Architecture document with ASCII flow diagrams,7 - Documentation & Architecture,Medium,,,0,ARCHITECTURE.md
+Generate system architecture PNG diagram,7 - Documentation & Architecture,Medium,,,0,generate_diagram.py → system_architecture.png
+Create interactive HTML architecture diagram,7 - Documentation & Architecture,Medium,,,0,architecture.html
+Create animated 9-slide demo HTML,7 - Documentation & Architecture,Important,,,0,demo.html — for presentations
+Push all code to GitHub test_cust repository,7 - Documentation & Architecture,Important,,,0,github.com/sagu25/test_cust
